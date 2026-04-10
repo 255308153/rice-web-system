@@ -1,0 +1,2 @@
+# 真实模型推理额外依赖（在 requirements.txt 基础上追加安装）
+tensorflow==2.19.0

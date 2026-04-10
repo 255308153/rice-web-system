@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: rice-platform
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/rice_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: root
+    password: hie681130
+  redis:
+    host: localhost
+    port: 6379
+    password:
+    database: 0
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.rice.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+jwt:
+  secret: rice-platform-secret-key-2026-secure-key-for-jwt-token
+  expiration: 86400000  # 24小时
+
+upload:
+  path: ./uploads/images/
+
+bailian:
+  # 建议通过环境变量配置: export BAILIAN_API_KEY=sk-xxxx
+  api-key: sk-2a2aaf165c50431195686e0354b3337c
+  base-url: ${BAILIAN_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions}
+  model: ${BAILIAN_MODEL:qwen-plus}
+  system-prompt: ${BAILIAN_SYSTEM_PROMPT:你是一个农业专家助手，请用中文给出简洁、可执行的建议。}
+  timeout-seconds: ${BAILIAN_TIMEOUT_SECONDS:60}
+
+server:
+  port: 8080

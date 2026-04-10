@@ -1,0 +1,76 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-page: #ffffff;
+  --bg-card: #f9fafb;
+  --text-main: #111827;
+  --text-muted: #6b7280;
+  --line-soft: #5eead4;
+  --brand: #14b8a6;
+  --brand-strong: #0d9488;
+  --accent: #2dd4bf;
+  --danger: #ef4444;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-soft: 0 4px 12px rgba(20, 184, 166, 0.15);
+}
+
+body {
+  font-family: 'STXingkai', 'STKaiti', 'KaiTi', 'LiSu', 'STFangsong', 'FangSong', serif;
+  background: #ffffff;
+  color: var(--text-main);
+  line-height: 1.8;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  transition: transform 0.16s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+input,
+select,
+textarea {
+  color: var(--text-main);
+  border: 1px solid var(--line-soft);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(15, 107, 207, 0.45);
+  box-shadow: 0 0 0 3px rgba(15, 107, 207, 0.12);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c9d3e1;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: #eef2f8;
+}

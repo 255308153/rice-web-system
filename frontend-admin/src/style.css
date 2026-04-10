@@ -1,0 +1,79 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-page: #f3f6fb;
+  --bg-card: #ffffff;
+  --text-main: #1f2937;
+  --text-muted: #667085;
+  --line-soft: #e6ebf2;
+  --brand: #0f6bcf;
+  --brand-strong: #0c5bb0;
+  --accent: #0f766e;
+  --danger: #dc2626;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --shadow-soft: 0 10px 30px rgba(15, 40, 70, 0.08);
+}
+
+body {
+  font-family: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  background:
+    radial-gradient(1200px 500px at -10% -20%, rgba(15, 107, 207, 0.08), transparent 45%),
+    radial-gradient(900px 380px at 110% 10%, rgba(15, 118, 110, 0.07), transparent 40%),
+    var(--bg-page);
+  color: var(--text-main);
+  line-height: 1.5;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  transition: transform 0.16s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+input,
+select,
+textarea {
+  color: var(--text-main);
+  border: 1px solid var(--line-soft);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(15, 107, 207, 0.45);
+  box-shadow: 0 0 0 3px rgba(15, 107, 207, 0.12);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c9d3e1;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: #eef2f8;
+}
