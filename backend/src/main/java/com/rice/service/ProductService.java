@@ -30,7 +30,10 @@ public class ProductService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
 
-    @Cacheable(cacheNames = "product:list", key = "T(String).valueOf(#page).concat(':').concat(T(String).valueOf(#size)).concat(':').concat(#keyword == null ? '' : #keyword.trim()).concat(':').concat(T(String).valueOf(#shopId))")
+    @Cacheable(
+            cacheNames = "product:list",
+            key = "'' + #page + ':' + #size + ':' + (#keyword == null ? '' : #keyword.trim()) + ':' + (#shopId == null ? '' : #shopId)"
+    )
     public Page<Product> list(int page, int size, String keyword, Long shopId) {
         Page<Product> pageObj = new Page<>(page, size);
         LambdaQueryWrapper<Product> wrapper = new LambdaQueryWrapper<>();

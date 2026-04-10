@@ -54,6 +54,12 @@ flowchart LR
 - AI 服务：`FastAPI + TensorFlow/Keras`
 - 鉴权方式：`JWT`（多角色权限控制）
 
+## 近期后端修复
+
+- 修复 `/api/products` 列表缓存 key 在空参数场景下的异常，恢复分页查询稳定性。
+- 修复 `/api/shops` 列表缓存反序列化类型丢失问题，避免 `LinkedHashMap -> Page` 强转异常。
+- 补充 `jackson-datatype-jsr310` 支持，确保 `LocalDateTime` 字段序列化兼容。
+
 ## 后端接口模块
 
 后端控制器已按业务拆分，主要包括：
