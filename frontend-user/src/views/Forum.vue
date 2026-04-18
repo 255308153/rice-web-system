@@ -54,7 +54,7 @@
             {{ post.favorited ? '已收藏' : '收藏' }}
           </span>
           <span class="action" @click="toggleComments(post)">
-            评论 {{ post.commentCount || 0 }}
+            {{ post.showComments ? '收起评论' : '展开评论' }}（{{ post.commentCount || 0 }}）
           </span>
         </div>
 

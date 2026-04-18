@@ -202,12 +202,20 @@ const formatMoney = (value) => {
 const parseOrderItems = (data) => {
   if (!Array.isArray(data)) return []
   return data
+    .map(item => {
+      const productId = item?.productId ?? item?.product_id ?? null
+      const orderId = item?.orderId ?? item?.order_id ?? null
+      const quantity = item?.quantity ?? item?.qty ?? 0
+      const price = item?.price ?? item?.unitPrice ?? 0
+      return {
+        ...item,
+        productId,
+        orderId,
+        quantity: Number(quantity || 0),
+        price: Number(price || 0)
+      }
+    })
     .filter(item => item && item.productId != null)
-    .map(item => ({
-      ...item,
-      quantity: Number(item.quantity || 0),
-      price: Number(item.price || 0)
-    }))
 }
 
 const resolveImageUrl = (url) => {
@@ -359,9 +367,7 @@ const showReview = async (order) => {
   reviewForm.value = { orderId: order.id, productId: null, rating: 5, content: '' }
   try {
     const res = await request.get(`/orders/${order.id}/items`)
-    const items = Array.isArray(res?.data)
-      ? res.data.filter(item => item && item.productId != null)
-      : []
+    const items = parseOrderItems(res?.data)
     reviewOrderItems.value = items
     if (items.length === 0) {
       alert('该订单暂无可评价商品')

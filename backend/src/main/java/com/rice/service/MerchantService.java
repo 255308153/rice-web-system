@@ -10,7 +10,6 @@ import com.rice.entity.Product;
 import com.rice.entity.RefundRequest;
 import com.rice.entity.Shop;
 import com.rice.entity.User;
-import com.rice.mapper.AIChatMapper;
 import com.rice.mapper.LogisticsMapper;
 import com.rice.mapper.OrderMapper;
 import com.rice.mapper.OrderItemMapper;
@@ -18,6 +17,8 @@ import com.rice.mapper.ProductMapper;
 import com.rice.mapper.RefundRequestMapper;
 import com.rice.mapper.ShopMapper;
 import com.rice.mapper.UserMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
@@ -38,13 +39,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class MerchantService {
+    private static final Logger log = LoggerFactory.getLogger(MerchantService.class);
     private static final Pattern ORDER_NO_MILLIS_PATTERN = Pattern.compile("(\\d{13})");
+    private static final int SUMMARY_AI_TIMEOUT_SECONDS = 4;
 
     @Autowired
     private ProductMapper productMapper;
@@ -252,12 +257,31 @@ public class MerchantService {
         Long shopId = resolveShopId(merchantId, null);
         int safeLimit = Math.max(1, Math.min(limit, 20));
         List<HotProductDTO> data = orderItemMapper.selectHotProductsByShop(shopId, safeLimit);
-        return data == null ? Collections.emptyList() : data;
+        if (data != null && !data.isEmpty()) {
+            return data;
+        }
+        return buildFallbackTopProducts(shopId, safeLimit);
     }
 
     public Map<String, Object> getSalesAssistantSummary(Long merchantId) {
         Map<String, Object> summary = buildSalesAssistantPayload(merchantId);
-        summary.put("assistantReply", chatService.generateMerchantSalesSummary(merchantId, summary));
+        String fallbackReply = buildLocalSalesSummary(summary);
+        summary.put("assistantReply", fallbackReply);
+        try {
+            String aiReply = CompletableFuture
+                    .supplyAsync(() -> chatService.generateMerchantSalesSummary(merchantId, summary))
+                    .completeOnTimeout(fallbackReply, SUMMARY_AI_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .exceptionally(ex -> {
+                        log.warn("商户销售摘要AI生成失败，使用本地摘要兜底: {}", ex.getMessage());
+                        return fallbackReply;
+                    })
+                    .join();
+            if (StringUtils.hasText(aiReply)) {
+                summary.put("assistantReply", aiReply);
+            }
+        } catch (Exception e) {
+            log.warn("商户销售摘要AI生成异常，使用本地摘要兜底: {}", e.getMessage());
+        }
         return summary;
     }
 
@@ -381,6 +405,125 @@ public class MerchantService {
         payload.put("recentOrders", recentOrders);
         payload.put("generatedAt", LocalDateTime.now());
         return payload;
+    }
+
+    private String buildLocalSalesSummary(Map<String, Object> summary) {
+        Map<String, Object> shop = toObjectMap(summary == null ? null : summary.get("shop"));
+        Map<String, Object> metrics = toObjectMap(summary == null ? null : summary.get("metrics"));
+        List<Map<String, Object>> topProducts = toObjectMapList(summary == null ? null : summary.get("topProducts"));
+
+        String shopName = String.valueOf(shop.getOrDefault("name", "当前店铺"));
+        int totalOrders = toInt(metrics.get("totalOrders"));
+        int paidOrders = toInt(metrics.get("paidOrders"));
+        int pendingOrders = toInt(metrics.get("pendingOrders"));
+        int uniqueBuyerCount = toInt(metrics.get("uniqueBuyerCount"));
+        String monthSalesAmount = toMoney(metrics.get("monthSalesAmount"));
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("【").append(shopName).append("经营快照】")
+                .append("累计订单 ").append(totalOrders).append(" 单，")
+                .append("成交 ").append(paidOrders).append(" 单，")
+                .append("成交买家 ").append(uniqueBuyerCount).append(" 人，")
+                .append("本月销售额 ¥").append(monthSalesAmount).append("，")
+                .append("待处理订单 ").append(pendingOrders).append(" 单。");
+
+        if (topProducts == null || topProducts.isEmpty()) {
+            builder.append("\n当前暂无热销商品统计，可先确保商品已上架并完成订单成交，后续系统会自动更新热销榜。");
+        } else {
+            Map<String, Object> first = topProducts.get(0);
+            String productName = String.valueOf(first.getOrDefault("productName", "主推商品"));
+            long salesCount = toLong(first.get("salesCount"));
+            builder.append("\n当前热销商品：").append(productName).append("（销量 ").append(salesCount).append(" 件）。");
+        }
+
+        builder.append("\n你可以继续提问：如“如何提升复购”或“本周主推什么商品”。");
+        return builder.toString();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toObjectMap(Object value) {
+        if (value instanceof Map<?, ?> mapValue) {
+            return (Map<String, Object>) mapValue;
+        }
+        return Collections.emptyMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> toObjectMapList(Object value) {
+        if (!(value instanceof List<?> listValue)) {
+            return Collections.emptyList();
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object item : listValue) {
+            if (item instanceof Map<?, ?> mapItem) {
+                result.add((Map<String, Object>) mapItem);
+            }
+        }
+        return result;
+    }
+
+    private int toInt(Object value) {
+        if (value instanceof Number numberValue) {
+            return numberValue.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private long toLong(Object value) {
+        if (value instanceof Number numberValue) {
+            return numberValue.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ignored) {
+            return 0L;
+        }
+    }
+
+    private String toMoney(Object value) {
+        if (value == null) {
+            return "0.00";
+        }
+        try {
+            BigDecimal amount = new BigDecimal(String.valueOf(value));
+            return amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+        } catch (Exception ignored) {
+            return "0.00";
+        }
+    }
+
+    /**
+     * 当店铺暂无成交订单时，回退展示店铺商品列表（按历史销量/创建顺序）。
+     * 这样经营助手页不会长期显示“暂无热销商品数据”。
+     */
+    private List<HotProductDTO> buildFallbackTopProducts(Long shopId, int limit) {
+        List<Product> products = productMapper.selectList(new LambdaQueryWrapper<Product>()
+                .eq(Product::getShopId, shopId)
+                .orderByDesc(Product::getSales)
+                .orderByDesc(Product::getId)
+                .last("LIMIT " + limit));
+        if (products == null || products.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<HotProductDTO> fallback = new ArrayList<>();
+        for (Product product : products) {
+            HotProductDTO dto = new HotProductDTO();
+            dto.setProductId(product.getId());
+            dto.setProductName(product.getName());
+
+            long salesCount = product.getSales() == null ? 0L : Math.max(product.getSales(), 0);
+            dto.setSalesCount(salesCount);
+
+            BigDecimal unitPrice = product.getPrice() == null ? BigDecimal.ZERO : product.getPrice();
+            dto.setSalesAmount(unitPrice.multiply(BigDecimal.valueOf(salesCount)));
+            fallback.add(dto);
+        }
+        return fallback;
     }
 
     private void fillRefundExtraFields(List<RefundRequest> refunds) {

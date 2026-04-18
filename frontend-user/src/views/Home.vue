@@ -1,29 +1,33 @@
 <template>
   <div class="home">
-    <section class="welcome-banner">
-      <div class="welcome-left">
-        <div class="avatar-large">系</div>
-        <div class="welcome-text">
-          <h2>{{ isExpert ? '专家工作台入口' : '欢迎回来，' + roleText }}</h2>
-          <p class="date">{{ currentDate }}</p>
+    <section class="hero-carousel">
+      <div class="carousel-stage">
+        <img
+          v-if="activeCarousel.imageUrl"
+          class="carousel-image"
+          :src="activeCarousel.imageUrl"
+          :alt="activeCarousel.title || '首页轮播图'"
+        />
+        <div v-else class="carousel-fallback"></div>
+        <div class="carousel-overlay">
           <button class="role-badge">{{ roleText }}</button>
-          <div class="slide-copy">
-            <h3>{{ activeSlide.title }}</h3>
-            <p>{{ activeSlide.description }}</p>
-          </div>
-          <div class="hero-dots" v-if="!isExpert">
-            <button
-              v-for="(slide, idx) in slides"
-              :key="slide.key"
-              :class="['hero-dot', { active: idx === currentSlideIndex }]"
-              @click="currentSlideIndex = idx"
-            ></button>
+          <h2>{{ activeCarousel.title || (isExpert ? '专家工作台入口' : '欢迎回来，普通用户') }}</h2>
+          <p class="carousel-subtitle">{{ activeCarousel.subtitle || currentDate }}</p>
+          <div class="carousel-actions">
+            <button class="btn-red" @click="goPrimary">{{ activeCarousel.linkText || primaryActionText }}</button>
+            <button class="btn-green" @click="goSecondary">助农论坛</button>
           </div>
         </div>
       </div>
-      <div class="welcome-right">
-        <button class="btn-red" @click="goPrimary">{{ primaryAction.text }}</button>
-        <button class="btn-green" @click="goSecondary">{{ secondaryAction.text }}</button>
+      <button v-if="carouselItems.length > 1" class="arrow prev" @click="prevCarousel">‹</button>
+      <button v-if="carouselItems.length > 1" class="arrow next" @click="nextCarousel">›</button>
+      <div v-if="carouselItems.length > 1" class="hero-dots">
+        <button
+          v-for="(item, idx) in carouselItems"
+          :key="`${item.imageUrl}-${idx}`"
+          :class="['hero-dot', { active: idx === currentSlideIndex }]"
+          @click="goToCarousel(idx)"
+        ></button>
       </div>
     </section>
 
@@ -105,37 +109,18 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
+import { getRoleFromToken } from '../utils/jwt'
 
 const router = useRouter()
 const currentDate = ref('')
 const currentSlideIndex = ref(0)
 const userRole = ref('USER')
+const carouselItems = ref([])
 const notices = ref([])
 const orders = ref([])
 const showModal = ref(false)
 const selectedNotice = ref(null)
-let slideTimer = null
-
-const defaultSlides = [
-  {
-    key: 'shop',
-    title: '一条搜索栏完成商品与店铺检索',
-    description: '商品页已合并搜索入口，可按商品或店铺切换搜索，并补充猜你喜欢推荐区。',
-    primaryText: '开始购物',
-    primaryLink: '/shop',
-    secondaryText: '查看订单',
-    secondaryLink: '/orders'
-  },
-  {
-    key: 'ai',
-    title: '上传识别后，建议会自动进入 AI 助手对话',
-    description: 'AI 页面已按“左侧识别、右侧对话”布局重构，适合直接跟进追问。',
-    primaryText: '打开 AI 服务',
-    primaryLink: '/ai',
-    secondaryText: '去论坛',
-    secondaryLink: '/forum'
-  }
-]
+let carouselTimer = null
 
 const isExpert = computed(() => userRole.value === 'EXPERT')
 const roleText = computed(() => {
@@ -146,37 +131,20 @@ const roleText = computed(() => {
   return roleMap[userRole.value] || '用户'
 })
 
-const slides = computed(() => {
-  const noticeSlides = notices.value.slice(0, 2).map((item, idx) => ({
-    key: `notice-${item.id || idx}`,
-    title: item.title || '系统公告',
-    description: item.content || '平台当前暂无更多公告内容。',
-    primaryText: '查看论坛',
-    primaryLink: '/forum',
-    secondaryText: '购物页面',
-    secondaryLink: '/shop'
-  }))
-  return [...defaultSlides, ...noticeSlides]
-})
-
-const activeSlide = computed(() => {
-  const list = slides.value.length > 0 ? slides.value : defaultSlides
-  return list[currentSlideIndex.value % list.length]
-})
-
-const primaryAction = computed(() => {
-  if (isExpert.value) {
-    return { text: '进入工作台', link: '/expert' }
+const activeCarousel = computed(() => {
+  if (!carouselItems.value.length) {
+    return {
+      imageUrl: '',
+      title: '',
+      subtitle: '',
+      link: '',
+      linkText: ''
+    }
   }
-  return { text: activeSlide.value.primaryText, link: activeSlide.value.primaryLink }
+  return carouselItems.value[currentSlideIndex.value % carouselItems.value.length]
 })
 
-const secondaryAction = computed(() => {
-  if (isExpert.value) {
-    return { text: '查看论坛', link: '/forum' }
-  }
-  return { text: activeSlide.value.secondaryText, link: activeSlide.value.secondaryLink }
-})
+const primaryActionText = computed(() => (isExpert.value ? '进入工作台' : '开始购物'))
 
 const decodeRole = () => {
   const token = localStorage.getItem('token')
@@ -184,12 +152,7 @@ const decodeRole = () => {
     userRole.value = 'USER'
     return
   }
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    userRole.value = payload.role || 'USER'
-  } catch (e) {
-    userRole.value = 'USER'
-  }
+  userRole.value = getRoleFromToken(token) || 'USER'
 }
 
 const getStatusText = (status) => {
@@ -221,6 +184,39 @@ const formatNoticeTime = (time) => {
   return String(time)
 }
 
+const resolveImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  return `http://localhost:8080${url}`
+}
+
+const normalizeCarouselItem = (item) => {
+  if (!item) return null
+  const imageUrl = resolveImageUrl(String(item.imageUrl || item.url || '').trim())
+  if (!imageUrl) return null
+  return {
+    imageUrl,
+    title: String(item.title || '').trim(),
+    subtitle: String(item.subtitle || '').trim(),
+    link: String(item.link || '').trim(),
+    linkText: String(item.linkText || '').trim()
+  }
+}
+
+const loadCarousel = async () => {
+  try {
+    const res = await request.get('/config/home-carousel')
+    if (res.code === 200 && Array.isArray(res.data)) {
+      carouselItems.value = res.data.map(normalizeCarouselItem).filter(Boolean)
+      currentSlideIndex.value = 0
+      return
+    }
+    carouselItems.value = []
+  } catch (e) {
+    carouselItems.value = []
+  }
+}
+
 const loadOrders = async () => {
   try {
     const res = await request.get('/orders/page?page=1&size=5&status=-1')
@@ -241,7 +237,7 @@ const loadOrders = async () => {
 
 const loadNotices = async () => {
   try {
-    const res = await request.get('/admin/notices?limit=5')
+    const res = await request.get('/notices?limit=5')
     if (res.code === 200) {
       notices.value = Array.isArray(res.data) ? res.data : []
     }
@@ -256,38 +252,55 @@ const showNoticeDetail = (notice) => {
 }
 
 const goPrimary = () => {
-  router.push(primaryAction.value.link)
+  if (activeCarousel.value.link) {
+    router.push(activeCarousel.value.link)
+    return
+  }
+  router.push(isExpert.value ? '/expert' : '/shop')
 }
 
 const goSecondary = () => {
-  router.push(secondaryAction.value.link)
+  router.push('/forum')
 }
 
-const startSlideTimer = () => {
-  stopSlideTimer()
-  slideTimer = setInterval(() => {
-    if (isExpert.value) return
-    const total = slides.value.length || 1
+const startCarouselTimer = () => {
+  stopCarouselTimer()
+  carouselTimer = setInterval(() => {
+    const total = carouselItems.value.length || 1
     currentSlideIndex.value = (currentSlideIndex.value + 1) % total
-  }, 4500)
+  }, 5000)
 }
 
-const stopSlideTimer = () => {
-  if (slideTimer) {
-    clearInterval(slideTimer)
-    slideTimer = null
+const stopCarouselTimer = () => {
+  if (carouselTimer) {
+    clearInterval(carouselTimer)
+    carouselTimer = null
   }
+}
+
+const prevCarousel = () => {
+  const total = carouselItems.value.length || 1
+  currentSlideIndex.value = (currentSlideIndex.value - 1 + total) % total
+}
+
+const nextCarousel = () => {
+  const total = carouselItems.value.length || 1
+  currentSlideIndex.value = (currentSlideIndex.value + 1) % total
+}
+
+const goToCarousel = (index) => {
+  currentSlideIndex.value = index
 }
 
 onMounted(async () => {
   decodeRole()
   currentDate.value = new Date().toLocaleString('zh-CN')
-  await Promise.all([loadOrders(), loadNotices()])
-  startSlideTimer()
+  await Promise.all([loadCarousel(), loadOrders(), loadNotices()])
+  startCarouselTimer()
 })
 
 onUnmounted(() => {
-  stopSlideTimer()
+  stopCarouselTimer()
 })
 </script>
 
@@ -297,51 +310,61 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-.welcome-banner {
-  background:
-    radial-gradient(420px 180px at 10% 10%, rgba(255, 255, 255, 0.24), transparent 60%),
-    linear-gradient(120deg, #14b8a6 0%, #0d9488 100%);
-  border-radius: var(--radius-lg);
-  padding: 44px 36px;
-  color: #fff;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.hero-carousel {
+  position: relative;
   margin-bottom: 24px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   box-shadow: var(--shadow-soft);
 }
 
-.welcome-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex: 1;
+.carousel-stage {
+  height: 260px;
+  position: relative;
+  background: transparent;
 }
 
-.avatar-large {
-  width: 72px;
-  height: 72px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.16);
+.carousel-image,
+.carousel-fallback {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.carousel-fallback {
+  background:
+    radial-gradient(420px 180px at 10% 10%, rgba(255, 255, 255, 0.24), transparent 60%),
+    linear-gradient(120deg, #14b8a6 0%, #0d9488 100%);
+}
+
+.carousel-overlay {
+  position: absolute;
+  inset: 0;
+  padding: 28px 30px;
+  background: transparent;
+  color: #fff;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
-  font-size: 30px;
-  font-weight: 700;
-  flex-shrink: 0;
+  align-items: flex-start;
 }
 
-.welcome-text h2 {
+.carousel-overlay h2 {
   font-size: 34px;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin: 10px 0 8px;
   letter-spacing: 0.4px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.55);
 }
 
-.date {
-  font-size: 16px;
-  color: rgba(255, 255, 255, 0.92);
-  margin-bottom: 14px;
+.carousel-subtitle {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.94);
+  margin-bottom: 16px;
+  max-width: min(760px, 90%);
+  line-height: 1.65;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
 .role-badge {
@@ -354,34 +377,26 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-.slide-copy {
-  margin-top: 18px;
-  max-width: 620px;
-}
-
-.slide-copy h3 {
-  font-size: 26px;
-  line-height: 1.3;
-  margin-bottom: 8px;
-}
-
-.slide-copy p {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.94);
+.carousel-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .hero-dots {
+  position: absolute;
+  left: 30px;
+  bottom: 14px;
   display: flex;
-  gap: 8px;
-  margin-top: 16px;
+  gap: 9px;
+  z-index: 3;
 }
 
 .hero-dot {
-  width: 26px;
-  height: 8px;
+  width: 24px;
+  height: 7px;
   border: none;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.42);
   cursor: pointer;
 }
 
@@ -389,11 +404,28 @@ onUnmounted(() => {
   background: #fff;
 }
 
-.welcome-right {
-  display: flex;
-  gap: 10px;
-  align-self: flex-start;
-  margin-top: 8px;
+.arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.86);
+  color: #0f766e;
+  font-size: 26px;
+  line-height: 1;
+  z-index: 3;
+}
+
+.arrow.prev {
+  left: 10px;
+}
+
+.arrow.next {
+  right: 10px;
 }
 
 .btn-red,
@@ -665,10 +697,9 @@ onUnmounted(() => {
 }
 
 @media (max-width: 980px) {
-  .welcome-banner,
+  .carousel-stage,
   .order-item {
-    flex-direction: column;
-    align-items: flex-start;
+    height: 220px;
   }
 
   .quick-links {
@@ -681,22 +712,30 @@ onUnmounted(() => {
     padding-bottom: 18px;
   }
 
-  .welcome-banner,
+  .hero-carousel,
   .notice-board,
   .recent-orders {
+    margin-bottom: 18px;
+  }
+
+  .carousel-stage {
+    height: 210px;
+  }
+
+  .carousel-overlay {
     padding: 18px;
   }
 
-  .welcome-text h2 {
-    font-size: 28px;
-  }
-
-  .slide-copy h3 {
-    font-size: 22px;
+  .carousel-overlay h2 {
+    font-size: 24px;
   }
 
   .quick-links {
     grid-template-columns: 1fr;
+  }
+
+  .arrow {
+    display: none;
   }
 
   .section-header {

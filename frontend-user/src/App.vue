@@ -49,6 +49,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import request from './utils/request'
+import { getRoleFromToken } from './utils/jwt'
 
 const router = useRouter()
 const route = useRoute()
@@ -90,12 +91,7 @@ const getToken = () => localStorage.getItem('token')
 
 const initialToken = getToken()
 if (initialToken) {
-  try {
-    const payload = JSON.parse(atob(initialToken.split('.')[1]))
-    userRole.value = payload.role || 'USER'
-  } catch (e) {
-    userRole.value = 'USER'
-  }
+  userRole.value = getRoleFromToken(initialToken) || 'USER'
 }
 
 const loadUnreadMessages = async () => {

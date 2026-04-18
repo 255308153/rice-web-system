@@ -34,29 +34,41 @@ public class PostService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public Post createPost(Post post) {
+        if (post == null) {
+            throw new RuntimeException("帖子参数不能为空");
+        }
         if (!StringUtils.hasText(post.getTitle())) {
             throw new RuntimeException("标题不能为空");
         }
         if (!StringUtils.hasText(post.getContent())) {
             throw new RuntimeException("内容不能为空");
         }
+        post.setTitle(trimText(post.getTitle(), 200));
+        post.setContent(trimText(post.getContent(), 4000));
+        post.setCategory(StringUtils.hasText(post.getCategory()) ? trimText(post.getCategory(), 64) : "综合交流");
+        post.setImages(trimText(post.getImages(), 1000));
+        post.setTags(trimText(post.getTags(), 255));
         post.setCreateTime(LocalDateTime.now());
         post.setViews(0);
         post.setLikes(0);
-        post.setCategory(StringUtils.hasText(post.getCategory()) ? post.getCategory().trim() : "综合交流");
 
-        Map<String, Object> auditResult = chatService.reviewPostContent(post.getUserId(), Map.of(
-                "title", trimText(post.getTitle(), 200),
-                "content", trimText(post.getContent(), 4000),
-                "category", post.getCategory(),
-                "images", trimText(post.getImages(), 1000)
-        ));
+        Map<String, Object> auditResult = chatService.reviewPostContent(post.getUserId(), buildPostAuditPayload(post));
         boolean violation = Boolean.TRUE.equals(auditResult.get("violation"));
         String reason = String.valueOf(auditResult.getOrDefault("reason", violation ? "AI预审核判定存在风险" : ""));
         post.setStatus(violation ? POST_STATUS_ABNORMAL : POST_STATUS_NORMAL);
         post.setAuditRemark(violation && StringUtils.hasText(reason) ? trimText(reason, 255) : null);
         postMapper.insert(post);
         return post;
+    }
+
+    private Map<String, Object> buildPostAuditPayload(Post post) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("title", post.getTitle());
+        payload.put("content", post.getContent());
+        payload.put("category", post.getCategory());
+        payload.put("tags", post.getTags());
+        payload.put("images", post.getImages());
+        return payload;
     }
 
     public Page<Post> listPosts(Long userId, int page, int size, String sortBy, String keyword, String category) {

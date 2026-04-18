@@ -6,6 +6,7 @@ import com.rice.entity.AIRecognition;
 import com.rice.entity.SystemConfig;
 import com.rice.mapper.AIRecognitionMapper;
 import com.rice.mapper.SystemConfigMapper;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,8 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.HashMap;
@@ -58,11 +61,51 @@ public class YoloService {
             .build();
 
     public Map<String, Object> recognizeRiceType(Long userId, MultipartFile image) throws Exception {
-        return recognizeByType(userId, image, RECOGNITION_RICE_TYPE);
+        return waitResult(recognizeRiceTypeAsync(userId, image));
     }
 
     public Map<String, Object> recognizeDisease(Long userId, MultipartFile image) throws Exception {
-        return recognizeByType(userId, image, RECOGNITION_DISEASE);
+        return waitResult(recognizeDiseaseAsync(userId, image));
+    }
+
+    public CompletableFuture<Map<String, Object>> recognizeRiceTypeAsync(Long userId, MultipartFile image) {
+        return recognizeByTypeAsync(userId, image, RECOGNITION_RICE_TYPE);
+    }
+
+    public CompletableFuture<Map<String, Object>> recognizeDiseaseAsync(Long userId, MultipartFile image) {
+        return recognizeByTypeAsync(userId, image, RECOGNITION_DISEASE);
+    }
+
+    public Map<String, Object> recognizeRiceTypeByImageUrl(Long userId, String imageUrl) throws Exception {
+        return recognizeByImageUrl(userId, imageUrl, RECOGNITION_RICE_TYPE);
+    }
+
+    public Map<String, Object> recognizeDiseaseByImageUrl(Long userId, String imageUrl) throws Exception {
+        return recognizeByImageUrl(userId, imageUrl, RECOGNITION_DISEASE);
+    }
+
+    private CompletableFuture<Map<String, Object>> recognizeByTypeAsync(Long userId, MultipartFile image, String recognitionType) {
+        final String imageUrl;
+        try {
+            imageUrl = fileUploadService.upload(image);
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
+        }
+
+        String serviceUrl = resolveYoloServiceUrl(recognitionType);
+        return callPredictServiceAsync(serviceUrl, image, recognitionType)
+                .exceptionally(ex -> buildFallbackResult(unwrapException(ex), serviceUrl))
+                .thenApply(fullResult -> {
+                    normalizeResult(fullResult, serviceUrl);
+                    Map<String, Object> result = buildScopedResult(fullResult, recognitionType);
+                    result.put("imageUrl", imageUrl);
+                    result.put("recognitionType", recognitionType);
+                    try {
+                        saveRecognitionRecord(userId, imageUrl, result);
+                    } catch (Exception ignored) {
+                    }
+                    return result;
+                });
     }
 
     private Map<String, Object> recognizeByType(Long userId, MultipartFile image, String recognitionType) throws Exception {
@@ -72,6 +115,30 @@ public class YoloService {
         String serviceUrl = resolveYoloServiceUrl(recognitionType);
         try {
             fullResult = callPredictService(serviceUrl, image, recognitionType);
+            if (fullResult == null || fullResult.isEmpty()) {
+                throw new RuntimeException("识别服务返回为空");
+            }
+        } catch (Exception e) {
+            fullResult = buildFallbackResult(e, serviceUrl);
+        }
+
+        normalizeResult(fullResult, serviceUrl);
+        Map<String, Object> result = buildScopedResult(fullResult, recognitionType);
+        result.put("imageUrl", imageUrl);
+        result.put("recognitionType", recognitionType);
+
+        saveRecognitionRecord(userId, imageUrl, result);
+        return result;
+    }
+
+    private Map<String, Object> recognizeByImageUrl(Long userId, String imageUrl, String recognitionType) throws Exception {
+        byte[] imageBytes = fileUploadService.readByPublicUrl(imageUrl);
+        String filename = extractFilename(imageUrl);
+
+        Map<String, Object> fullResult;
+        String serviceUrl = resolveYoloServiceUrl(recognitionType);
+        try {
+            fullResult = callPredictService(serviceUrl, imageBytes, filename, recognitionType);
             if (fullResult == null || fullResult.isEmpty()) {
                 throw new RuntimeException("识别服务返回为空");
             }
@@ -142,7 +209,7 @@ public class YoloService {
     }
 
     private String resolveYoloServiceUrl(String recognitionType) {
-        Map<String, Object> aiConfig = parseAiConfig();
+        Map<String, Object> aiConfig = getAiConfig();
         if (RECOGNITION_RICE_TYPE.equals(recognitionType)) {
             return firstText(
                     aiConfig.get("riceTypeYoloUrl"),
@@ -163,7 +230,8 @@ public class YoloService {
         );
     }
 
-    private Map<String, Object> parseAiConfig() {
+    @Cacheable(cacheNames = "ai:config", key = "'ai-config-map'")
+    public Map<String, Object> getAiConfig() {
         try {
             SystemConfig config = systemConfigMapper.selectOne(new LambdaQueryWrapper<SystemConfig>()
                     .eq(SystemConfig::getConfigKey, "ai")
@@ -180,12 +248,16 @@ public class YoloService {
         if (!StringUtils.hasText(serviceUrl)) {
             throw new RuntimeException("未配置识别服务地址");
         }
+        return callPredictService(serviceUrl, image.getBytes(), image.getOriginalFilename(), recognitionType);
+    }
+
+    private Map<String, Object> callPredictService(String serviceUrl, byte[] imageBytes, String filename, String recognitionType) throws Exception {
         String predictUrl = normalizePredictUrl(serviceUrl);
-        String imageBase64 = Base64.getEncoder().encodeToString(image.getBytes());
+        String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
 
         Map<String, Object> payload = new HashMap<>();
         payload.put("imageBase64", imageBase64);
-        payload.put("filename", image.getOriginalFilename());
+        payload.put("filename", filename);
         payload.put("recognitionType", recognitionType);
         String body = objectMapper.writeValueAsString(payload);
 
@@ -197,6 +269,56 @@ public class YoloService {
                 .build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        return parsePredictResponse(response);
+    }
+
+    private CompletableFuture<Map<String, Object>> callPredictServiceAsync(String serviceUrl, MultipartFile image, String recognitionType) {
+        if (!StringUtils.hasText(serviceUrl)) {
+            return CompletableFuture.failedFuture(new RuntimeException("未配置识别服务地址"));
+        }
+        try {
+            return callPredictServiceAsync(serviceUrl, image.getBytes(), image.getOriginalFilename(), recognitionType);
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    private CompletableFuture<Map<String, Object>> callPredictServiceAsync(String serviceUrl, byte[] imageBytes, String filename, String recognitionType) {
+        if (!StringUtils.hasText(serviceUrl)) {
+            return CompletableFuture.failedFuture(new RuntimeException("未配置识别服务地址"));
+        }
+        try {
+            String predictUrl = normalizePredictUrl(serviceUrl);
+            String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("imageBase64", imageBase64);
+            payload.put("filename", filename);
+            payload.put("recognitionType", recognitionType);
+            String body = objectMapper.writeValueAsString(payload);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(predictUrl))
+                    .timeout(Duration.ofSeconds(Math.max(5, yoloTimeoutSeconds)))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
+                    .build();
+
+            return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+                    .thenApply(response -> {
+                        try {
+                            return parsePredictResponse(response);
+                        } catch (RuntimeException e) {
+                            throw e;
+                        } catch (Exception e) {
+                            throw new RuntimeException(e.getMessage(), e);
+                        }
+                    });
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    private Map<String, Object> parsePredictResponse(HttpResponse<String> response) throws Exception {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String bodySnippet = asText(response.body(), "");
             if (bodySnippet.length() > 220) {
@@ -205,7 +327,6 @@ public class YoloService {
             throw new RuntimeException("识别服务异常(" + response.statusCode() + ")" +
                     (StringUtils.hasText(bodySnippet) ? (": " + bodySnippet) : ""));
         }
-
         Map<String, Object> parsed = objectMapper.readValue(response.body(), Map.class);
         if (parsed.containsKey("data") && parsed.get("data") instanceof Map<?, ?> nested) {
             return (Map<String, Object>) nested;
@@ -409,5 +530,38 @@ public class YoloService {
             }
         }
         return "";
+    }
+
+    private Map<String, Object> waitResult(CompletableFuture<Map<String, Object>> future) throws Exception {
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            Throwable cause = unwrapException(e);
+            if (cause instanceof Exception ex) {
+                throw ex;
+            }
+            throw new RuntimeException(cause.getMessage(), cause);
+        }
+    }
+
+    private Exception unwrapException(Throwable e) {
+        Throwable current = e;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current instanceof Exception ex ? ex : new RuntimeException(current == null ? "unknown" : current.getMessage(), current);
+    }
+
+    private String extractFilename(String imageUrl) {
+        String fallback = "recognition-image.jpg";
+        if (!StringUtils.hasText(imageUrl)) {
+            return fallback;
+        }
+        int index = imageUrl.lastIndexOf('/');
+        if (index < 0 || index >= imageUrl.length() - 1) {
+            return fallback;
+        }
+        String filename = imageUrl.substring(index + 1).trim();
+        return StringUtils.hasText(filename) ? filename : fallback;
     }
 }

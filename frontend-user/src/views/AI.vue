@@ -107,12 +107,12 @@
         </div>
 
         <div class="chat-input">
-          <textarea
-            v-model.trim="question"
-            placeholder="继续追问，例如：这种病害后续 7 天该怎么观察？"
-            @keyup.enter.exact.prevent="sendMessage"
-          />
-          <div class="chat-actions">
+          <div class="chat-input-row">
+            <textarea
+              v-model.trim="question"
+              placeholder="继续追问，例如：这种病害后续 7 天该怎么观察？"
+              @keyup.enter.exact.prevent="sendMessage"
+            />
             <button class="btn-send" :disabled="loadingChat" @click="sendMessage">
               {{ loadingChat ? '发送中...' : '发送' }}
             </button>
@@ -233,7 +233,14 @@ const handleUpload = async (event) => {
     }
     alert(res.message || '识别失败')
   } catch (e) {
-    alert(isTimeoutError(e) ? '识别超时，请稍后重试' : '识别失败，请稍后重试')
+    const backendMessage = e?.response?.data?.message
+    if (isTimeoutError(e)) {
+      alert('识别超时，请稍后重试')
+    } else if (backendMessage) {
+      alert(backendMessage)
+    } else {
+      alert('识别失败，请稍后重试')
+    }
   } finally {
     loadingRef.value = false
     event.target.value = ''
@@ -419,7 +426,7 @@ onMounted(() => {
 
 .upload-area {
   margin-top: 6px;
-  min-height: 280px;
+  height: 360px;
   border: 1px dashed rgba(94, 234, 212, 0.36);
   border-radius: 14px;
   background: linear-gradient(145deg, rgba(20, 184, 166, 0.08), rgba(45, 212, 191, 0.14));
@@ -433,7 +440,8 @@ onMounted(() => {
 .upload-area img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .upload-empty {
@@ -505,7 +513,8 @@ onMounted(() => {
 
 .chat-card {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 640px;
   min-height: 640px;
 }
 
@@ -533,7 +542,9 @@ onMounted(() => {
 .chat-messages {
   margin-top: 14px;
   padding: 6px 2px 0;
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   align-content: start;
   gap: 12px;
@@ -583,26 +594,30 @@ onMounted(() => {
   padding-top: 14px;
 }
 
+.chat-input-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
 .chat-input textarea {
-  width: 100%;
-  min-height: 110px;
+  flex: 1;
+  min-height: 56px;
+  max-height: 120px;
   border: 1px solid rgba(94, 234, 212, 0.3);
   border-radius: 16px;
   padding: 14px 16px;
-  resize: vertical;
+  resize: none;
   background: #ffffff;
-}
-
-.chat-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 10px;
 }
 
 .btn-send {
   background: var(--brand);
   color: #fff;
-  padding: 11px 18px;
+  min-width: 96px;
+  height: 56px;
+  padding: 0 20px;
+  flex-shrink: 0;
 }
 
 .btn-send:disabled {
@@ -616,7 +631,8 @@ onMounted(() => {
   }
 
   .chat-card {
-    min-height: auto;
+    height: 560px;
+    min-height: 560px;
   }
 }
 
@@ -633,6 +649,19 @@ onMounted(() => {
 
   .type-switch {
     grid-template-columns: 1fr;
+  }
+
+  .upload-area {
+    height: 280px;
+  }
+
+  .chat-input-row {
+    flex-direction: column;
+  }
+
+  .btn-send {
+    width: 100%;
+    height: 48px;
   }
 
   .message {

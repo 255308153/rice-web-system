@@ -1,6 +1,20 @@
 <template>
+  <div class="profile-page">
   <div class="profile">
-    <h2>{{ isMerchant ? '店铺信息' : '个人信息' }}</h2>
+    <section class="profile-hero">
+      <img v-if="user.avatar" class="hero-avatar" :src="resolveImageUrl(user.avatar)" alt="用户头像" />
+      <div v-else class="hero-avatar hero-avatar-fallback">{{ getAvatarText(user.username, user.id) }}</div>
+      <div class="hero-meta">
+        <h2>{{ user.username || '未命名用户' }}</h2>
+        <p class="hero-sub">{{ formatRole(user.role) }} · {{ user.phone || '未绑定手机号' }}</p>
+        <div class="hero-tags">
+          <span>ID {{ user.id || '-' }}</span>
+          <span>{{ isMerchant ? '管理端个人中心' : '账号个人中心' }}</span>
+        </div>
+      </div>
+    </section>
+
+    <h2>个人信息</h2>
     <div class="profile-card" v-if="!isMerchant">
       <div class="form-group">
         <label>用户名</label>
@@ -16,7 +30,44 @@
       </div>
       <button @click="saveProfile" class="btn-save">保存</button>
     </div>
-    <div class="profile-card" v-else>
+    <div class="profile-card merchant-profile" v-else>
+      <div class="form-group">
+        <label>用户名</label>
+        <input v-model="user.username" disabled />
+      </div>
+      <div class="form-group">
+        <label>手机号</label>
+        <input v-model.trim="user.phone" placeholder="请输入手机号" />
+      </div>
+      <div class="form-group">
+        <label>角色</label>
+        <input :value="formatRole(user.role)" disabled />
+      </div>
+      <div class="form-group">
+        <label>昵称</label>
+        <input :value="user.username" disabled placeholder="请输入昵称，不填则默认显示用户名" />
+      </div>
+      <div class="form-group">
+        <label>店铺评分</label>
+        <input :value="shop.rating || 5.0" disabled />
+      </div>
+      <div class="form-group full avatar-form-group">
+        <label>头像</label>
+        <div class="avatar-editor">
+          <img v-if="user.avatar" class="avatar-preview" :src="resolveImageUrl(user.avatar)" alt="头像预览" />
+          <div v-else class="avatar-preview avatar-preview-fallback">{{ getAvatarText(user.username, user.id) }}</div>
+          <div class="avatar-editor-actions">
+            <button type="button" class="btn-upload-avatar" :disabled="avatarUploading" @click="triggerAvatarUpload">
+              {{ avatarUploading ? '上传中...' : '上传头像' }}
+            </button>
+            <input ref="avatarInputRef" class="hidden-input" type="file" accept="image/*" @change="onAvatarFileChange" />
+            <input v-model.trim="user.avatar" placeholder="/uploads/images/xxxx.png" />
+          </div>
+        </div>
+      </div>
+      <div class="form-group full section-tip">
+        店铺信息
+      </div>
       <div class="form-group">
         <label>店铺名称</label>
         <input v-model.trim="shop.name" placeholder="请输入店铺名称" />
@@ -33,11 +84,7 @@
         <label>营业执照</label>
         <input v-model.trim="shop.license" placeholder="请输入营业执照编号" />
       </div>
-      <div class="form-group">
-        <label>店铺评分</label>
-        <input :value="shop.rating || 5.0" disabled />
-      </div>
-      <button @click="saveProfile" class="btn-save">保存店铺信息</button>
+      <button @click="saveProfile" class="btn-save">保存</button>
     </div>
 
     <h3 v-if="!isMerchant">角色认证</h3>
@@ -221,6 +268,7 @@
       <div v-if="addresses.length === 0" class="empty">暂无地址</div>
     </div>
   </div>
+  </div>
 </template>
 
 <script setup>
@@ -230,7 +278,9 @@ import request from '../utils/request'
 import { clearBrowseHistory, getBrowseHistory } from '@/utils/history'
 
 const router = useRouter()
-const user = ref({ username: '', phone: '', role: '' })
+const user = ref({ id: null, username: '', phone: '', role: '', avatar: '' })
+const avatarInputRef = ref(null)
+const avatarUploading = ref(false)
 const shop = ref({ id: null, name: '', description: '', license: '', contact: '', rating: 5.0 })
 const addresses = ref([])
 const certifications = ref([])
@@ -300,6 +350,46 @@ const formatTime = (time) => {
   return String(time)
 }
 
+const resolveImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  return `http://localhost:8080${url}`
+}
+
+const getAvatarText = (name, id) => {
+  const text = String(name || '').trim()
+  if (text) return text.slice(0, 1).toUpperCase()
+  if (id !== undefined && id !== null) return String(id).slice(-1)
+  return 'U'
+}
+
+const triggerAvatarUpload = () => {
+  if (avatarInputRef.value) {
+    avatarInputRef.value.click()
+  }
+}
+
+const onAvatarFileChange = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('image', file)
+  avatarUploading.value = true
+  try {
+    const res = await request.post('/user/upload-avatar', formData)
+    if (res.code === 200 && res.data?.url) {
+      user.value.avatar = res.data.url
+      return
+    }
+    alert(res.message || '头像上传失败')
+  } catch (e) {
+    alert('头像上传失败')
+  } finally {
+    avatarUploading.value = false
+    event.target.value = ''
+  }
+}
+
 const loadProfile = async () => {
   try {
     const res = await request.get('/user/info')
@@ -346,23 +436,36 @@ const loadAddresses = async () => {
 const saveProfile = async () => {
   try {
     if (isMerchant.value) {
-      if (!shop.value.id) {
-        alert('店铺信息不存在')
+      const userPayload = {
+        username: user.value.username,
+        phone: user.value.phone,
+        avatar: user.value.avatar
+      }
+      const userRes = await request.put('/user/info', userPayload)
+      if (userRes.code !== 200) {
+        alert(userRes.message || '个人信息保存失败')
         return
       }
-      const res = await request.put(`/shops/${shop.value.id}`, shop.value)
-      if (res.code === 200) {
+
+      if (!shop.value.id) {
+        alert('个人信息已保存，未找到店铺信息')
+        await loadProfile()
+        return
+      }
+      const shopRes = await request.put(`/shops/${shop.value.id}`, shop.value)
+      if (shopRes.code === 200) {
         alert('保存成功')
-        await loadShop(user.value.id)
+        await loadProfile()
       } else {
-        alert(res.message || '保存失败')
+        alert(shopRes.message || '店铺信息保存失败')
       }
       return
     }
 
     const payload = {
       username: user.value.username,
-      phone: user.value.phone
+      phone: user.value.phone,
+      avatar: user.value.avatar
     }
     const res = await request.put('/user/info', payload)
     if (res.code === 200) {
@@ -559,9 +662,75 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.profile-page {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
 .profile {
   max-width: 1120px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.profile-hero {
+  border: 1px solid #1c8f84;
+  border-radius: 14px;
+  padding: 16px;
+  background: linear-gradient(120deg, #238ea3 0%, #1f7e74 100%);
+  box-shadow: 0 12px 26px rgba(15, 40, 70, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+}
+
+.hero-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.hero-avatar-fallback {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.hero-meta h2 {
+  margin: 0 0 2px;
+  color: #fff;
+  font-size: 24px;
+}
+
+.hero-sub {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  margin: 0 0 6px;
+}
+
+.hero-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hero-tags span {
+  font-size: 12px;
+  color: #e8fcf7;
+  border: 1px solid rgba(220, 252, 231, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  padding: 3px 10px;
 }
 
 h2, h3 {
@@ -586,6 +755,63 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 16px;
+}
+
+.avatar-form-group {
+  grid-column: 1 / -1;
+}
+
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-preview {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 1px solid #dbe5f2;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.avatar-preview-fallback {
+  background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  color: #1d4ed8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.avatar-editor-actions {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-upload-avatar {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 8px;
+  background: #0f766e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-upload-avatar:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.hidden-input {
+  display: none;
 }
 
 .form-group label {
@@ -615,6 +841,15 @@ h3 {
   border-radius: 8px;
   cursor: pointer;
   font-weight: 700;
+}
+
+.merchant-profile .section-tip {
+  margin-top: 4px;
+  margin-bottom: -2px;
+  font-weight: 700;
+  color: #334155;
+  border-top: 1px dashed #d6e2f2;
+  padding-top: 8px;
 }
 
 .cert-form {

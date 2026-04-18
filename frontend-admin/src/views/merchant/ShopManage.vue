@@ -27,6 +27,12 @@
       </div>
     </div>
 
+    <div v-if="loadingSummary" class="state-tip">正在加载经营数据...</div>
+    <div v-else-if="summaryError" class="state-tip state-error">
+      {{ summaryError }}
+      <button class="btn-retry" @click="loadSummary">重试</button>
+    </div>
+
     <div class="content-grid">
       <section class="panel overview-panel">
         <div class="panel-head">
@@ -69,9 +75,10 @@
         </div>
 
         <div class="input-box">
-          <textarea
+          <input
             v-model.trim="question"
             placeholder="例如：最近该主推哪类商品？需要怎么做组合促销？"
+            :disabled="loadingChat"
             @keyup.enter.exact.prevent="sendMessage"
           />
           <button class="btn-send" :disabled="loadingChat" @click="sendMessage">
@@ -91,6 +98,8 @@ const summary = ref(null)
 const messages = ref([])
 const question = ref('')
 const loadingChat = ref(false)
+const loadingSummary = ref(false)
+const summaryError = ref('')
 
 const formatMoney = (value) => {
   const num = Number(value)
@@ -106,6 +115,8 @@ const splitMessage = (text) => {
 }
 
 const loadSummary = async () => {
+  loadingSummary.value = true
+  summaryError.value = ''
   try {
     const res = await request.get('/merchant/assistant/summary')
     if (res.code === 200) {
@@ -113,11 +124,14 @@ const loadSummary = async () => {
       messages.value = res.data?.assistantReply
         ? [{ id: Date.now(), role: 'assistant', content: res.data.assistantReply }]
         : []
+      loadingSummary.value = false
       return
     }
-    alert(res.message || '加载经营摘要失败')
+    summaryError.value = res.message || '经营摘要加载失败，请稍后重试。'
   } catch (e) {
-    alert('加载经营摘要失败')
+    summaryError.value = '经营摘要加载失败，请检查登录状态或网络连接。'
+  } finally {
+    loadingSummary.value = false
   }
 }
 
@@ -200,6 +214,34 @@ onMounted(loadSummary)
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.state-tip {
+  background: #f8fafc;
+  border: 1px dashed #c4d4e8;
+  color: #60758f;
+  border-radius: 14px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.state-error {
+  color: #9a3412;
+  border-color: #f3c4b4;
+  background: #fff8f4;
+}
+
+.btn-retry {
+  border: 1px solid #f0b89e;
+  border-radius: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+  background: #fff;
+  color: #9a3412;
+  font-weight: 700;
 }
 
 .stat-card {
@@ -333,23 +375,36 @@ onMounted(loadSummary)
   margin-top: 14px;
   border-top: 1px solid #edf2f7;
   padding-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
 }
 
-.input-box textarea {
+.input-box input {
   width: 100%;
-  min-height: 110px;
+  min-height: 56px;
   border: 1px solid #dbe6f2;
   border-radius: 16px;
-  padding: 14px 16px;
-  resize: vertical;
+  padding: 0 18px;
   background: #fbfdff;
+  font-size: 16px;
+  color: #24364b;
 }
 
 .btn-send {
-  margin-top: 10px;
   background: #0f6bcf;
   color: #fff;
-  padding: 11px 18px;
+  padding: 0 26px;
+  min-height: 56px;
+  border-radius: 16px;
+  font-size: 18px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.input-box input::placeholder {
+  color: #8a98ad;
 }
 
 .btn-send:disabled {
@@ -386,6 +441,14 @@ onMounted(loadSummary)
 
   .message {
     max-width: 100%;
+  }
+
+  .input-box {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-send {
+    width: 100%;
   }
 }
 </style>

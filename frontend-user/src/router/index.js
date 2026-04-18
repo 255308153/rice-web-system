@@ -1,16 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getRoleFromToken } from '@/utils/jwt'
 
 const USER_FRONT_ROLES = ['USER', 'EXPERT']
-
-const parseRoleFromToken = (token) => {
-  if (!token) return null
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.role || 'USER'
-  } catch (e) {
-    return null
-  }
-}
 
 const getUserFrontHome = (role) => {
   if (role === 'EXPERT') return '/expert'
@@ -102,7 +93,7 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
-  const role = parseRoleFromToken(token)
+  const role = getRoleFromToken(token)
 
   if (!token && to.path !== '/login') {
     return next('/login')

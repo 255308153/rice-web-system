@@ -19,6 +19,8 @@ import java.util.Map;
 @RequestMapping("/api")
 @RequiredArgsConstructor
 public class MessageController {
+    private static final long MAX_IMAGE_SIZE = 20L * 1024 * 1024;
+
     private final MessageService messageService;
     private final FileUploadService fileUploadService;
 
@@ -85,8 +87,8 @@ public class MessageController {
             if (image == null || image.isEmpty()) {
                 return Result.error("请选择图片");
             }
-            if (image.getSize() > 5 * 1024 * 1024) {
-                return Result.error("图片大小不能超过5MB");
+            if (image.getSize() > MAX_IMAGE_SIZE) {
+                return Result.error("图片大小不能超过20MB");
             }
             String contentType = image.getContentType();
             if (contentType == null || !contentType.startsWith("image/")) {

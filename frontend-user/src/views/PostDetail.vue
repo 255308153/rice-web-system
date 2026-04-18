@@ -37,7 +37,11 @@
         </button>
       </div>
     </div>
-    <div class="comments-section">
+    <div v-else class="post-empty">
+      <h3>帖子暂不可查看</h3>
+      <p>{{ loadError || '帖子不存在或已被处理' }}</p>
+    </div>
+    <div v-if="post" class="comments-section">
       <h3>评论（{{ comments.length }}）</h3>
       <div class="comment-input">
         <textarea v-model.trim="commentText" placeholder="写评论..." />
@@ -124,6 +128,7 @@ const comments = ref([])
 const commentText = ref('')
 const images = ref([])
 const currentUserId = ref(null)
+const loadError = ref('')
 const replyOpenMap = ref({})
 const replyDraftMap = ref({})
 const replyTargetMap = ref({})
@@ -264,29 +269,45 @@ const chatWithUser = async (userId) => {
 }
 
 const loadPost = async () => {
-  const res = await request.get(`/posts/${route.params.id}`)
-  if (res.code === 200) {
-    post.value = res.data
-    images.value = parseImages(res.data?.images)
-    addBrowseHistory({
-      type: 'POST',
-      id: res.data.id,
-      title: res.data.title,
-      subtitle: res.data.content?.slice(0, 28) || '',
-      path: `/post/${res.data.id}`,
-      image: images.value[0] || ''
-    })
+  loadError.value = ''
+  post.value = null
+  images.value = []
+  try {
+    const res = await request.get(`/posts/${route.params.id}`)
+    if (res.code === 200 && res.data) {
+      post.value = res.data
+      images.value = parseImages(res.data?.images)
+      addBrowseHistory({
+        type: 'POST',
+        id: res.data.id,
+        title: res.data.title,
+        subtitle: res.data.content?.slice(0, 28) || '',
+        path: `/post/${res.data.id}`,
+        image: images.value[0] || ''
+      })
+      return
+    }
+    loadError.value = res?.message || '帖子暂不可查看'
+  } catch (error) {
+    loadError.value = error?.response?.data?.message || '帖子加载失败，请稍后重试'
   }
 }
 
 const loadComments = async () => {
-  const res = await request.get(`/posts/${route.params.id}/comments?page=1&size=100`)
-  if (res.code === 200) {
-    const list = res.data?.records || res.data || []
-    comments.value = list.map(c => ({
-      ...c,
-      createTime: getCommentTime(c)
-    }))
+  comments.value = []
+  try {
+    const res = await request.get(`/posts/${route.params.id}/comments?page=1&size=100`)
+    if (res.code === 200) {
+      const list = res.data?.records || res.data || []
+      comments.value = list.map(c => ({
+        ...c,
+        createTime: getCommentTime(c)
+      }))
+      return
+    }
+    comments.value = []
+  } catch (error) {
+    comments.value = []
   }
 }
 
@@ -379,10 +400,12 @@ const submitReply = async (parentComment) => {
   alert(res.message || '回复失败')
 }
 
-onMounted(() => {
+onMounted(async () => {
   decodeCurrentUserId()
-  loadPost()
-  loadComments()
+  await loadPost()
+  if (post.value) {
+    await loadComments()
+  }
 })
 </script>
 
@@ -410,6 +433,27 @@ onMounted(() => {
   margin-bottom: 12px;
   border: 1px solid var(--line-soft);
   box-shadow: 0 10px 22px rgba(15, 40, 70, 0.07);
+}
+
+.post-empty {
+  background: #fff;
+  padding: 22px;
+  border-radius: 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line-soft);
+  box-shadow: 0 10px 22px rgba(15, 40, 70, 0.07);
+}
+
+.post-empty h3 {
+  margin: 0 0 10px;
+  color: #0f172a;
+  font-size: 22px;
+}
+
+.post-empty p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.8;
 }
 
 .post h2 {

@@ -88,6 +88,7 @@
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import request from '../utils/request'
+import { createChatSocket } from '../utils/chatSocket'
 
 const route = useRoute()
 const userId = ref(null)
@@ -105,6 +106,7 @@ const imageInputRef = ref(null)
 const messageListRef = ref(null)
 const shouldAutoScroll = ref(true)
 let refreshTimer = null
+let wsClient = null
 
 const decodeJwtPayload = (token) => {
   try {
@@ -226,6 +228,27 @@ const loadMessages = async (convId, options = {}) => {
   }
 }
 
+const onRealtimeMessage = async (event) => {
+  if (!event || event.type !== 'CHAT_MESSAGE') {
+    return
+  }
+  await loadConversations()
+  if (currentConvId.value && String(event.conversationId) === String(currentConvId.value)) {
+    shouldAutoScroll.value = true
+    await loadMessages(currentConvId.value, { forceScroll: true })
+  }
+}
+
+const initRealtimeChat = () => {
+  if (wsClient) {
+    wsClient.disconnect()
+  }
+  wsClient = createChatSocket({
+    onMessage: onRealtimeMessage
+  })
+  wsClient.connect()
+}
+
 const selectConv = async (conv) => {
   currentConvId.value = conv.id
   currentReceiverId.value = conv.peerId || (String(conv.user1Id) === String(userId.value) ? conv.user2Id : conv.user1Id)
@@ -324,6 +347,7 @@ onMounted(async () => {
   await loadContacts()
   await loadConversations()
   await selectConversationFromRoute()
+  initRealtimeChat()
   refreshTimer = setInterval(async () => {
     await loadConversations()
     if (currentConvId.value) {
@@ -336,6 +360,10 @@ onUnmounted(() => {
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = null
+  }
+  if (wsClient) {
+    wsClient.disconnect()
+    wsClient = null
   }
 })
 </script>

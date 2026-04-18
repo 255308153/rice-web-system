@@ -12,7 +12,9 @@ import com.rice.mapper.ConversationMapper;
 import com.rice.mapper.MessageMapper;
 import com.rice.mapper.SystemConfigMapper;
 import com.rice.mapper.UserMapper;
+import com.rice.ws.ChatWsPushService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +34,7 @@ public class MessageService {
     private final ConversationMapper conversationMapper;
     private final UserMapper userMapper;
     private final SystemConfigMapper systemConfigMapper;
+    private final ChatWsPushService chatWsPushService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional
@@ -65,6 +68,7 @@ public class MessageService {
         message.setType(normalizedType);
         message.setIsRead(0);
         messageMapper.insert(message);
+        chatWsPushService.pushChatMessageAfterCommit(message, conversation, receiverId);
         return message;
     }
 
@@ -175,10 +179,11 @@ public class MessageService {
         Long user1Id = Math.min(userId, peerId);
         Long user2Id = Math.max(userId, peerId);
 
-        Conversation conversation = conversationMapper.selectOne(
-                new LambdaQueryWrapper<Conversation>()
-                        .eq(Conversation::getUser1Id, user1Id)
-                        .eq(Conversation::getUser2Id, user2Id));
+        LambdaQueryWrapper<Conversation> query = new LambdaQueryWrapper<Conversation>()
+                .eq(Conversation::getUser1Id, user1Id)
+                .eq(Conversation::getUser2Id, user2Id);
+
+        Conversation conversation = conversationMapper.selectOne(query);
 
         if (conversation != null) {
             return conversation;
@@ -188,8 +193,17 @@ public class MessageService {
         conversation.setUser1Id(user1Id);
         conversation.setUser2Id(user2Id);
         conversation.setLastTime(LocalDateTime.now());
-        conversationMapper.insert(conversation);
-        return conversation;
+        try {
+            conversationMapper.insert(conversation);
+            return conversation;
+        } catch (DuplicateKeyException ex) {
+            // 并发下另一个请求已成功创建会话：回查并复用现有会话，保证幂等
+            Conversation existing = conversationMapper.selectOne(query);
+            if (existing != null) {
+                return existing;
+            }
+            throw new RuntimeException("会话创建失败，请稍后重试");
+        }
     }
 
     private void assertConversationMember(Long userId, Long conversationId) {

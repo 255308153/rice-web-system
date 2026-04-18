@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -34,5 +35,35 @@ public class FileUploadService {
         }
 
         return "/uploads/images/" + filename;
+    }
+
+    public byte[] readByPublicUrl(String imageUrl) throws IOException {
+        if (imageUrl == null || imageUrl.isBlank() || !imageUrl.startsWith("/uploads/images/")) {
+            throw new IOException("图片地址不合法");
+        }
+        String filename = imageUrl.substring(imageUrl.lastIndexOf('/') + 1);
+        if (filename.isBlank()) {
+            throw new IOException("图片文件名为空");
+        }
+
+        String safeFilename;
+        try {
+            safeFilename = Paths.get(filename).getFileName().toString();
+        } catch (InvalidPathException e) {
+            throw new IOException("图片文件名不合法");
+        }
+        if (!safeFilename.equals(filename)) {
+            throw new IOException("图片文件名不合法");
+        }
+
+        Path dir = Paths.get(uploadPath).toAbsolutePath().normalize();
+        Path target = dir.resolve(safeFilename).normalize();
+        if (!target.startsWith(dir)) {
+            throw new IOException("图片路径不合法");
+        }
+        if (!Files.exists(target)) {
+            throw new IOException("图片文件不存在: " + safeFilename);
+        }
+        return Files.readAllBytes(target);
     }
 }

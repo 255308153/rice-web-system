@@ -2,6 +2,7 @@ package com.rice.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.rice.common.Result;
+import com.rice.dto.ProductReviewDTO;
 import com.rice.entity.Product;
 import com.rice.service.ProductService;
 import lombok.RequiredArgsConstructor;
@@ -33,5 +34,12 @@ public class ProductController {
     @GetMapping("/{id}")
     public Result<Product> getById(@PathVariable Long id) {
         return Result.success(productService.getById(id));
+    }
+
+    @GetMapping("/{id}/reviews")
+    public Result<Page<ProductReviewDTO>> listReviews(@PathVariable Long id,
+                                                      @RequestParam(defaultValue = "1") int page,
+                                                      @RequestParam(defaultValue = "10") int size) {
+        return Result.success(productService.listReviews(id, page, size));
     }
 }

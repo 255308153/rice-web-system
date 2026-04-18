@@ -247,10 +247,18 @@ CREATE TABLE `refund_request` (
   `reason` VARCHAR(500) COMMENT '退款原因',
   `amount` DECIMAL(10,2) NOT NULL,
   `status` TINYINT DEFAULT 0 COMMENT '0待处理/1同意/2拒绝',
+  `pending_guard` VARCHAR(64)
+    GENERATED ALWAYS AS (
+      CASE
+        WHEN `status` = 0 THEN CONCAT(`order_id`, '_', `user_id`)
+        ELSE NULL
+      END
+    ) STORED COMMENT '待处理退款唯一约束辅助列',
   `merchant_remark` VARCHAR(500) COMMENT '商户处理说明',
   `audit_time` DATETIME COMMENT '处理时间',
   `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_pending_guard (`pending_guard`),
   INDEX idx_order_id (`order_id`),
   INDEX idx_shop_id (`shop_id`),
   INDEX idx_user_id (`user_id`),

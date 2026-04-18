@@ -10,6 +10,7 @@ import com.rice.dto.HotProductDTO;
 import com.rice.dto.MonitorOverviewDTO;
 import com.rice.entity.*;
 import com.rice.mapper.*;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -514,6 +515,16 @@ public class AdminService {
         return config != null ? config.getConfigValue() : null;
     }
 
+    public String getConfigValue(String key) {
+        if (!StringUtils.hasText(key)) {
+            return null;
+        }
+        SystemConfig config = systemConfigMapper.selectOne(
+                new LambdaQueryWrapper<SystemConfig>().eq(SystemConfig::getConfigKey, key.trim()));
+        return config != null ? config.getConfigValue() : null;
+    }
+
+    @CacheEvict(cacheNames = "ai:config", allEntries = true)
     public void setConfig(Long adminId, String key, String value, String description) {
         assertAdmin(adminId);
         if (!StringUtils.hasText(key)) {

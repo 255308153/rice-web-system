@@ -66,7 +66,6 @@
           <div class="route-hint">{{ route.path }}</div>
         </div>
         <div class="user-info">
-          <span class="fullscreen" aria-hidden="true"></span>
           <span class="avatar">{{ displayAvatarText }}</span>
           <span class="username">{{ displayName }}</span>
           <button @click="logout" class="btn-logout">退出</button>
@@ -344,29 +343,6 @@ const logout = () => {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.fullscreen {
-  width: 18px;
-  height: 18px;
-  display: inline-block;
-  position: relative;
-  cursor: pointer;
-}
-
-.fullscreen::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(#64748b, #64748b) left top / 6px 2px no-repeat,
-    linear-gradient(#64748b, #64748b) left top / 2px 6px no-repeat,
-    linear-gradient(#64748b, #64748b) right top / 6px 2px no-repeat,
-    linear-gradient(#64748b, #64748b) right top / 2px 6px no-repeat,
-    linear-gradient(#64748b, #64748b) left bottom / 6px 2px no-repeat,
-    linear-gradient(#64748b, #64748b) left bottom / 2px 6px no-repeat,
-    linear-gradient(#64748b, #64748b) right bottom / 6px 2px no-repeat,
-    linear-gradient(#64748b, #64748b) right bottom / 2px 6px no-repeat;
 }
 
 .avatar {

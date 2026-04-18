@@ -1,6 +1,10 @@
 spring:
   application:
     name: rice-platform
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/rice_platform?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
@@ -33,6 +37,13 @@ bailian:
   model: ${BAILIAN_MODEL:qwen-plus}
   system-prompt: ${BAILIAN_SYSTEM_PROMPT:你是一个农业专家助手，请用中文给出简洁、可执行的建议。}
   timeout-seconds: ${BAILIAN_TIMEOUT_SECONDS:60}
+
+ai:
+  recognition:
+    queue-key: ${AI_RECOGNITION_QUEUE_KEY:ai:recognition:queue}
+    task-key-prefix: ${AI_RECOGNITION_TASK_KEY_PREFIX:ai:recognition:task:}
+    task-ttl-hours: ${AI_RECOGNITION_TASK_TTL_HOURS:24}
+    worker-enabled: ${AI_RECOGNITION_WORKER_ENABLED:true}
 
 server:
   port: 8080

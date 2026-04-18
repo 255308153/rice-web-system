@@ -14,6 +14,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class UserController {
+    private static final long MAX_IMAGE_SIZE = 20L * 1024 * 1024;
 
     @Autowired
     private UserService userService;
@@ -61,8 +62,8 @@ public class UserController {
             if (image == null || image.isEmpty()) {
                 return Result.error("请选择头像图片");
             }
-            if (image.getSize() > 5 * 1024 * 1024) {
-                return Result.error("头像大小不能超过5MB");
+            if (image.getSize() > MAX_IMAGE_SIZE) {
+                return Result.error("头像大小不能超过20MB");
             }
             String contentType = image.getContentType();
             if (contentType == null || !contentType.startsWith("image/")) {

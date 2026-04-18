@@ -9,6 +9,7 @@
       <button :class="{ active: tab === 'ai' }" @click="tab = 'ai'">AI参数</button>
       <button :class="{ active: tab === 'trade' }" @click="tab = 'trade'">交易规则</button>
       <button :class="{ active: tab === 'forum' }" @click="tab = 'forum'">论坛分类</button>
+      <button :class="{ active: tab === 'carousel' }" @click="tab = 'carousel'">首页轮播</button>
       <button :class="{ active: tab === 'notice' }" @click="tab = 'notice'">系统公告</button>
       <button :class="{ active: tab === 'backup' }" @click="tab = 'backup'">数据库备份</button>
     </div>
@@ -52,6 +53,57 @@
         </div>
       </div>
       <button class="btn-save" @click="saveForumCategories">保存论坛分类</button>
+    </div>
+
+    <div v-if="tab === 'carousel'" class="notice-wrap">
+      <div class="panel">
+        <div class="form-group">
+          <label>轮播标题</label>
+          <input v-model.trim="carouselForm.title" placeholder="例如：春耕专场，优选大米上新" />
+        </div>
+        <div class="form-group">
+          <label>轮播副标题</label>
+          <input v-model.trim="carouselForm.subtitle" placeholder="例如：管理员可在后台动态维护首页轮播图" />
+        </div>
+        <div class="form-group">
+          <label>跳转链接（可选）</label>
+          <input v-model.trim="carouselForm.link" placeholder="例如：/shop 或 /ai" />
+        </div>
+        <div class="form-group">
+          <label>按钮文案（可选）</label>
+          <input v-model.trim="carouselForm.linkText" placeholder="例如：立即查看" />
+        </div>
+        <div class="form-group">
+          <label>轮播图片地址</label>
+          <div class="inline">
+            <input v-model.trim="carouselForm.imageUrl" placeholder="输入图片URL，或点击右侧上传" />
+            <label class="btn-inline upload-btn">
+              {{ carouselUploading ? '上传中...' : '上传图片' }}
+              <input type="file" accept="image/*" :disabled="carouselUploading" @change="uploadCarouselImage" hidden />
+            </label>
+          </div>
+        </div>
+        <button class="btn-save" @click="addCarouselItem">添加到轮播列表</button>
+      </div>
+
+      <div class="list">
+        <div v-for="(item, idx) in carouselItems" :key="`${item.imageUrl}-${idx}`" class="list-item">
+          <div class="item-main carousel-item-main">
+            <img class="carousel-thumb" :src="resolveImageUrl(item.imageUrl)" alt="轮播图预览" />
+            <div>
+              <div class="item-title">{{ item.title || '未命名轮播图' }}</div>
+              <div class="item-meta">
+                <span>序号：{{ idx + 1 }}</span>
+                <span>链接：{{ item.link || '-' }}</span>
+              </div>
+              <div class="item-content">{{ item.subtitle || '无副标题' }}</div>
+            </div>
+          </div>
+          <button class="btn-delete" @click="removeCarouselItem(idx)">删除</button>
+        </div>
+        <div v-if="carouselItems.length === 0" class="empty">暂无轮播图，请先添加</div>
+      </div>
+      <button class="btn-save" @click="saveCarouselConfig">保存首页轮播配置</button>
     </div>
 
     <div v-if="tab === 'notice'" class="notice-wrap">
@@ -130,6 +182,15 @@ const tradeConfig = ref({
 })
 const forumCategories = ref(['综合交流', '种植经验', '病虫害防治', '市场行情', '政策资讯'])
 const newCategory = ref('')
+const carouselForm = ref({
+  title: '',
+  subtitle: '',
+  link: '',
+  linkText: '',
+  imageUrl: ''
+})
+const carouselItems = ref([])
+const carouselUploading = ref(false)
 const noticeForm = ref({
   title: '',
   role: 'ALL',
@@ -161,11 +222,31 @@ const formatSize = (size) => {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+const resolveImageUrl = (url) => {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  return `http://localhost:8080${url}`
+}
+
+const normalizeCarouselItem = (item) => {
+  if (!item) return null
+  const imageUrl = String(item.imageUrl || item.url || '').trim()
+  if (!imageUrl) return null
+  return {
+    imageUrl,
+    title: String(item.title || '').trim(),
+    subtitle: String(item.subtitle || '').trim(),
+    link: String(item.link || '').trim(),
+    linkText: String(item.linkText || '').trim()
+  }
+}
+
 const loadConfig = async () => {
-  const [aiRes, tradeRes, forumRes] = await Promise.all([
+  const [aiRes, tradeRes, forumRes, carouselRes] = await Promise.all([
     request.get('/admin/config/ai'),
     request.get('/admin/config/trade'),
-    request.get('/admin/forum/categories')
+    request.get('/admin/forum/categories'),
+    request.get('/admin/config/home_carousel')
   ])
 
   if (aiRes.code === 200 && aiRes.data) {
@@ -186,6 +267,13 @@ const loadConfig = async () => {
 
   if (forumRes.code === 200 && Array.isArray(forumRes.data) && forumRes.data.length > 0) {
     forumCategories.value = forumRes.data
+  }
+
+  if (carouselRes.code === 200 && carouselRes.data) {
+    const parsed = safeJsonParse(carouselRes.data, [])
+    if (Array.isArray(parsed)) {
+      carouselItems.value = parsed.map(normalizeCarouselItem).filter(Boolean)
+    }
   }
 }
 
@@ -262,6 +350,68 @@ const saveForumCategories = async () => {
   })
   if (res.code === 200) {
     alert('论坛分类已保存')
+    return
+  }
+  alert(res.message || '保存失败')
+}
+
+const addCarouselItem = () => {
+  const normalized = normalizeCarouselItem(carouselForm.value)
+  if (!normalized) {
+    alert('请先上传或填写轮播图片地址')
+    return
+  }
+  carouselItems.value.push(normalized)
+  carouselForm.value = {
+    title: '',
+    subtitle: '',
+    link: '',
+    linkText: '',
+    imageUrl: ''
+  }
+}
+
+const removeCarouselItem = (index) => {
+  carouselItems.value.splice(index, 1)
+}
+
+const uploadCarouselImage = async (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  const formData = new FormData()
+  formData.append('image', file)
+  carouselUploading.value = true
+  try {
+    const res = await request.post('/posts/upload-image', formData)
+    if (res.code === 200 && res.data?.url) {
+      carouselForm.value.imageUrl = res.data.url
+      alert('图片上传成功')
+    } else {
+      alert(res.message || '图片上传失败')
+    }
+  } catch (e) {
+    alert('图片上传失败，请稍后重试')
+  } finally {
+    carouselUploading.value = false
+    event.target.value = ''
+  }
+}
+
+const saveCarouselConfig = async () => {
+  const payload = carouselItems.value.map(item => ({
+    imageUrl: item.imageUrl,
+    title: item.title || '',
+    subtitle: item.subtitle || '',
+    link: item.link || '',
+    linkText: item.linkText || ''
+  }))
+  const res = await request.put('/admin/config', {
+    key: 'home_carousel',
+    value: JSON.stringify(payload),
+    description: '用户首页轮播图配置'
+  })
+  if (res.code === 200) {
+    alert('首页轮播配置已保存')
     return
   }
   alert(res.message || '保存失败')
@@ -400,6 +550,12 @@ h2 {
   cursor: pointer;
 }
 
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .category-list {
   display: flex;
   flex-wrap: wrap;
@@ -467,6 +623,23 @@ h2 {
   flex: 1;
 }
 
+.carousel-item-main {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.carousel-thumb {
+  width: 180px;
+  height: 88px;
+  border-radius: 8px;
+  object-fit: contain;
+  object-position: center;
+  border: 1px solid #dbe7f3;
+  background: transparent;
+  flex-shrink: 0;
+}
+
 .item-title {
   font-size: 15px;
   color: #0f172a;
@@ -531,6 +704,16 @@ h2 {
 
   .list-item {
     flex-direction: column;
+  }
+
+  .carousel-item-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .carousel-thumb {
+    width: 100%;
+    height: 140px;
   }
 }
 </style>

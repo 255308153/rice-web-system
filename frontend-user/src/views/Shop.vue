@@ -1,14 +1,5 @@
 <template>
   <div class="shop-page">
-    <section class="hero">
-      <div>
-        <p class="hero-kicker">商城搜索与推荐</p>
-        <h1>一条搜索栏切换商品搜索或店铺搜索</h1>
-        <p>搜索合并后，页面保留店铺筛选、猜你喜欢和 10 条一页的商品展示节奏。</p>
-      </div>
-      <button class="hero-btn" @click="resetSearch">重置筛选</button>
-    </section>
-
     <section class="search-card">
       <select v-model="searchMode">
         <option value="PRODUCT">商品搜索</option>
@@ -25,7 +16,6 @@
     <section class="shop-results">
       <div class="section-head">
         <h3>店铺筛选</h3>
-        <p>店铺搜索结果会显示在这里，“猜你喜欢”也并入这一栏按需切换显示。</p>
       </div>
       <div class="shop-chip-group">
         <button class="shop-chip" :class="{ active: browsingMode === 'ALL' }" @click="chooseAllProducts">全部商品</button>
@@ -46,22 +36,21 @@
     </section>
 
     <section class="filter-card">
-      <select v-model="sortBy">
-        <option value="time">综合排序</option>
-        <option value="sales">按销量</option>
-        <option value="price_asc">价格从低到高</option>
-        <option value="price_desc">价格从高到低</option>
-      </select>
-      <input v-model.trim="locationFilter" placeholder="按发货地筛选" />
-      <input v-model.trim="priceMinInput" type="number" min="0" placeholder="最低价" />
-      <input v-model.trim="priceMaxInput" type="number" min="0" placeholder="最高价" />
+      <button class="filter-pill" :class="{ active: !isRecommendationMode && sortBy === 'time' }" @click="chooseComprehensive">
+        综合
+      </button>
+      <button class="filter-pill" :class="{ active: !isRecommendationMode && sortBy === 'sales' }" @click="chooseSales">
+        销量
+      </button>
+      <button class="filter-pill" :class="{ active: isRecommendationMode }" @click="chooseRecommendations">
+        猜你喜欢
+      </button>
     </section>
 
     <section class="product-card-wrapper">
       <div class="section-head">
         <div>
           <h3>{{ currentSectionTitle }}</h3>
-          <p>{{ currentSectionDesc }}</p>
         </div>
         <div class="pager-inline">
           <button :disabled="currentPage <= 1" @click="changeCurrentPage(-1)">上一页</button>
@@ -119,9 +108,6 @@ const searchMode = ref('PRODUCT')
 const searchKeyword = ref('')
 const activeProductKeyword = ref('')
 const sortBy = ref('time')
-const locationFilter = ref('')
-const priceMinInput = ref('')
-const priceMaxInput = ref('')
 const productPage = ref(1)
 const recommendationPage = ref(1)
 const recommendations = ref([])
@@ -129,38 +115,13 @@ const recommendationTotal = ref(0)
 const loadingProducts = ref(false)
 const loadingRecommendations = ref(false)
 const loadError = ref('')
+const RECOMMEND_MIN_COUNT = 10
 const isRecommendationMode = computed(() => browsingMode.value === 'RECOMMEND')
 
-const normalizeNumberInput = (value) => {
-  if (value === '' || value === null || value === undefined) return null
-  const num = Number(value)
-  if (!Number.isFinite(num) || num < 0) return null
-  return num
-}
-
 const filteredProducts = computed(() => {
-  const minPrice = normalizeNumberInput(priceMinInput.value)
-  const maxPrice = normalizeNumberInput(priceMaxInput.value)
   let list = [...allProducts.value]
 
-  if (locationFilter.value) {
-    const keyword = String(locationFilter.value).trim()
-    list = list.filter(item => String(getProductOrigin(item) || '').includes(keyword))
-  }
-
-  if (minPrice !== null) {
-    list = list.filter(item => Number(item.price || 0) >= minPrice)
-  }
-
-  if (maxPrice !== null) {
-    list = list.filter(item => Number(item.price || 0) <= maxPrice)
-  }
-
-  if (sortBy.value === 'price_asc') {
-    list.sort((a, b) => Number(a.price || 0) - Number(b.price || 0))
-  } else if (sortBy.value === 'price_desc') {
-    list.sort((a, b) => Number(b.price || 0) - Number(a.price || 0))
-  } else if (sortBy.value === 'sales') {
+  if (sortBy.value === 'sales') {
     list.sort((a, b) => Number(b.sales || 0) - Number(a.sales || 0))
   } else {
     list.sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
@@ -180,15 +141,6 @@ const currentSectionTitle = computed(() => {
   if (browsingMode.value === 'SHOP' && selectedShopId.value) return `${getShopName(selectedShopId.value)} 商品`
   return '全部商品'
 })
-const currentSectionDesc = computed(() => {
-  if (browsingMode.value === 'RECOMMEND') {
-    return `基于历史购买行为的物品协同过滤推荐，当前共 ${recommendationTotal.value} 款推荐商品。`
-  }
-  if (browsingMode.value === 'SHOP' && selectedShopId.value) {
-    return `当前为 ${getShopName(selectedShopId.value)} 的商品列表，共 ${filteredProducts.value.length} 款商品，按 10 款一页展示。`
-  }
-  return `当前共 ${filteredProducts.value.length} 款商品，已按 10 款一页分页展示。`
-})
 const currentEmptyText = computed(() => (
   isRecommendationMode.value ? '当前暂无推荐商品。' : '暂无符合条件的商品'
 ))
@@ -197,6 +149,33 @@ const productPageData = computed(() => {
   const start = (productPage.value - 1) * 10
   return filteredProducts.value.slice(start, start + 10)
 })
+
+const fillRecommendationsToMinimum = (items) => {
+  const deduped = []
+  const seenIds = new Set()
+
+  for (const item of items || []) {
+    const id = Number(item?.id)
+    if (!Number.isFinite(id) || seenIds.has(id)) continue
+    seenIds.add(id)
+    deduped.push(item)
+  }
+
+  if (deduped.length >= RECOMMEND_MIN_COUNT) {
+    return deduped.slice(0, RECOMMEND_MIN_COUNT)
+  }
+
+  const fallbackPool = [...allProducts.value].sort((a, b) => Number(b?.sales || 0) - Number(a?.sales || 0))
+  for (const item of fallbackPool) {
+    const id = Number(item?.id)
+    if (!Number.isFinite(id) || seenIds.has(id)) continue
+    seenIds.add(id)
+    deduped.push(item)
+    if (deduped.length >= RECOMMEND_MIN_COUNT) break
+  }
+
+  return deduped
+}
 
 const parseImages = (rawImages) => {
   if (!rawImages) return []
@@ -302,6 +281,12 @@ const loadProducts = async () => {
       const list = res.data?.records || res.data || []
       allProducts.value = list
 
+      if (recommendationPage.value === 1 && recommendations.value.length > 0 && recommendations.value.length < RECOMMEND_MIN_COUNT) {
+        const nextRecords = fillRecommendationsToMinimum(recommendations.value)
+        recommendations.value = nextRecords
+        recommendationTotal.value = Math.max(recommendationTotal.value, nextRecords.length)
+      }
+
       const shopIds = [...new Set(list.map(item => item.shopId).filter(Boolean))]
       const missing = shopIds.filter(id => !shopMap.value[id])
       if (missing.length > 0) {
@@ -329,8 +314,15 @@ const loadRecommendations = async () => {
       }
     })
     if (res.code === 200) {
-      recommendations.value = res.data?.records || []
-      recommendationTotal.value = Number(res.data?.total || recommendations.value.length)
+      const rawRecords = res.data?.records || []
+      const nextRecords = recommendationPage.value === 1
+        ? fillRecommendationsToMinimum(rawRecords)
+        : rawRecords
+      recommendations.value = nextRecords
+      recommendationTotal.value = Math.max(
+        Number(res.data?.total || rawRecords.length),
+        nextRecords.length
+      )
       return
     }
   } catch (e) {
@@ -372,6 +364,22 @@ const chooseRecommendations = async () => {
   if (recommendations.value.length === 0) {
     await loadRecommendations()
   }
+}
+
+const chooseComprehensive = async () => {
+  sortBy.value = 'time'
+  browsingMode.value = 'ALL'
+  selectedShopId.value = null
+  productPage.value = 1
+  await loadProducts()
+}
+
+const chooseSales = async () => {
+  sortBy.value = 'sales'
+  browsingMode.value = 'ALL'
+  selectedShopId.value = null
+  productPage.value = 1
+  await loadProducts()
 }
 
 const chooseShop = async (shopId) => {
@@ -421,22 +429,7 @@ const goShop = (shopId) => {
   router.push(`/shop/store/${shopId}`)
 }
 
-const resetSearch = async () => {
-  browsingMode.value = 'ALL'
-  searchMode.value = 'PRODUCT'
-  searchKeyword.value = ''
-  activeProductKeyword.value = ''
-  selectedShopId.value = null
-  sortBy.value = 'time'
-  locationFilter.value = ''
-  priceMinInput.value = ''
-  priceMaxInput.value = ''
-  productPage.value = 1
-  recommendationPage.value = 1
-  await Promise.all([loadShops(''), loadProducts(), loadRecommendations()])
-}
-
-watch([sortBy, locationFilter, priceMinInput, priceMaxInput], () => {
+watch(sortBy, () => {
   productPage.value = 1
 })
 
@@ -453,7 +446,6 @@ onMounted(async () => {
   gap: 18px;
 }
 
-.hero,
 .search-card,
 .shop-results,
 .filter-card,
@@ -464,37 +456,6 @@ onMounted(async () => {
   box-shadow: var(--shadow-soft);
 }
 
-.hero {
-  padding: 30px 32px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  background:
-    radial-gradient(360px 180px at 12% 12%, rgba(255,255,255,0.24), transparent 60%),
-    linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
-  color: #fff;
-}
-
-.hero-kicker {
-  font-size: 12px;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-  opacity: 0.84;
-  margin-bottom: 8px;
-}
-
-.hero h1 {
-  font-size: 36px;
-  margin-bottom: 8px;
-}
-
-.hero p {
-  color: rgba(255, 255, 255, 0.88);
-  line-height: 1.7;
-}
-
-.hero-btn,
 .btn-search,
 .btn-enter-shop,
 .btn-detail,
@@ -506,12 +467,6 @@ onMounted(async () => {
   font-weight: 700;
 }
 
-.hero-btn {
-  background: #fff;
-  color: var(--brand-strong);
-  padding: 11px 16px;
-}
-
 .search-card,
 .filter-card {
   padding: 16px;
@@ -521,18 +476,29 @@ onMounted(async () => {
 }
 
 .filter-card {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .search-card select,
 .search-card input,
-.filter-card select,
-.filter-card input {
+.filter-pill {
   width: 100%;
   padding: 12px 14px;
   border: 1px solid rgba(94, 234, 212, 0.34);
   border-radius: 10px;
   background: #ffffff;
+}
+
+.filter-pill {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--brand-strong);
+}
+
+.filter-pill.active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
 }
 
 .btn-search {
@@ -757,7 +723,6 @@ onMounted(async () => {
 @media (max-width: 900px) {
   .search-card,
   .filter-card,
-  .hero,
   .section-head {
     grid-template-columns: 1fr;
     flex-direction: column;

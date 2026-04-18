@@ -23,20 +23,24 @@
     <div v-if="tab === 'post'" class="list">
       <div v-for="item in postList" :key="item.id" class="card">
         <div class="main">
-          <div class="title">{{ item.title }}</div>
+          <div class="title-row">
+            <div class="title">{{ item.title }}</div>
+            <span class="status" :class="`status-${item.status ?? 1}`">{{ getPostStatusText(item.status) }}</span>
+          </div>
           <div class="meta">
             <span>帖子ID：{{ item.id }}</span>
             <span>作者：{{ item.username || `用户#${item.userId}` }}</span>
             <span>分类：{{ item.category || '综合交流' }}</span>
             <span>时间：{{ formatTime(item.createTime) }}</span>
           </div>
-          <div class="content">{{ item.content }}</div>
-          <div class="meta">
-            <span class="status" :class="`status-${item.status ?? 1}`">{{ getPostStatusText(item.status) }}</span>
-            <span v-if="item.auditRemark">AI审核建议：{{ item.auditRemark }}</span>
+          <div v-if="String(item.content || '').trim()" class="content">{{ item.content }}</div>
+          <div v-if="String(item.auditRemark || '').trim()" class="audit-remark">
+            <span class="audit-label">AI审核建议</span>
+            <span class="audit-text">{{ item.auditRemark }}</span>
           </div>
         </div>
         <div class="actions">
+          <button class="btn-view" @click="openPostPage(item.id, null, item.status)">查看帖子</button>
           <button v-if="(item.status ?? 1) !== 1" class="btn-on" @click="updatePostStatus(item, 1)">设为正常</button>
           <button v-if="(item.status ?? 1) !== 0" class="btn-warn" @click="updatePostStatus(item, 0)">设为异常</button>
           <button v-if="(item.status ?? 1) !== 2" class="btn-off" @click="updatePostStatus(item, 2)">下架</button>
@@ -61,6 +65,7 @@
           </div>
         </div>
         <div class="actions">
+          <button class="btn-view" @click="openPostPage(item.postId, item.id)">查看评论</button>
           <button
             :class="(item.status ?? 1) === 1 ? 'btn-off' : 'btn-on'"
             @click="toggleCommentStatus(item)"
@@ -92,6 +97,7 @@ const size = ref(10)
 const total = ref(0)
 const postList = ref([])
 const commentList = ref([])
+const USER_FRONT_BASE_URL = (import.meta.env.VITE_USER_FRONT_BASE_URL || 'http://localhost:3000').replace(/\/$/, '')
 
 const postStatusOptions = [
   { value: 1, label: '正常' },
@@ -214,6 +220,21 @@ const toggleCommentStatus = async (item) => {
   alert(res.message || `${actionText}失败`)
 }
 
+const openPostPage = (postId, commentId, postStatus) => {
+  if (!postId) {
+    alert('未找到关联帖子，暂时无法跳转')
+    return
+  }
+  if (postStatus != null && Number(postStatus) !== 1) {
+    const statusText = Number(postStatus) === 0 ? '异常（待审核）' : '下架'
+    alert(`当前帖子状态为${statusText}，前台帖子页默认不可见。请先设为“正常”后再查看。`)
+    return
+  }
+  const query = commentId ? `?commentId=${encodeURIComponent(commentId)}` : ''
+  const url = `${USER_FRONT_BASE_URL}/post/${encodeURIComponent(postId)}${query}`
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
 onMounted(loadCurrent)
 </script>
 
@@ -312,16 +333,28 @@ h2 {
   display: flex;
   gap: 12px;
   justify-content: space-between;
+  align-items: flex-start;
 }
 
 .main {
   flex: 1;
+  min-width: 0;
+}
+
+.title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
 }
 
 .title {
   font-weight: 700;
   color: #0f172a;
-  margin-bottom: 6px;
+  font-size: 15px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .meta {
@@ -341,17 +374,42 @@ h2 {
   word-break: break-word;
 }
 
-.actions {
+.audit-remark {
   display: flex;
   gap: 8px;
   align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px dashed #f59e0b;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.audit-label {
+  flex-shrink: 0;
+  font-weight: 700;
+}
+
+.audit-text {
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
   flex-shrink: 0;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 230px;
 }
 
 .btn-off,
 .btn-on,
-.btn-warn {
+.btn-warn,
+.btn-view {
   border: none;
   border-radius: 8px;
   color: #fff;
@@ -370,6 +428,10 @@ h2 {
 
 .btn-warn {
   background: #f59e0b;
+}
+
+.btn-view {
+  background: #2563eb;
 }
 
 .status {
@@ -459,6 +521,10 @@ h2 {
 
   .card {
     flex-direction: column;
+  }
+
+  .actions {
+    min-width: 0;
   }
 }
 </style>

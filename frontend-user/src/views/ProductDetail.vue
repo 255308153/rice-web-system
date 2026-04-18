@@ -41,12 +41,32 @@
           </div>
         </div>
       </div>
+
+      <div class="review-section">
+        <h3>商品评价（{{ reviewTotal }}）</h3>
+        <div v-if="reviewError" class="review-empty">{{ reviewError }}</div>
+        <div v-else-if="reviews.length === 0" class="review-empty">暂无评价，欢迎购买后评价。</div>
+        <div v-else class="review-list">
+          <div class="review-item" v-for="item in reviews" :key="item.id">
+            <div class="review-head">
+              <div class="review-user">
+                <img v-if="item.userAvatar" :src="resolveImageUrl(item.userAvatar)" alt="用户头像" class="review-avatar" />
+                <div v-else class="review-avatar review-avatar-fallback">{{ getNameText(item.username, item.userId) }}</div>
+                <span>{{ item.username || `用户${item.userId || ''}` }}</span>
+              </div>
+              <span class="review-time">{{ formatTime(item.createTime) }}</span>
+            </div>
+            <div class="review-rating">{{ renderStars(item.rating) }}</div>
+            <p class="review-content">{{ item.content || '该用户未填写评价内容。' }}</p>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
 import { addBrowseHistory } from '@/utils/history'
@@ -63,6 +83,9 @@ const specs = ref({
   taste: '',
   shelfLife: ''
 })
+const reviews = ref([])
+const reviewTotal = ref(0)
+const reviewError = ref('')
 const defaultDescription = '该商品来自优质产区，米粒饱满，口感香软，适合日常家庭食用。'
 
 const parseImages = (rawImages) => {
@@ -154,22 +177,80 @@ const parseSpecs = (raw) => {
   }
 }
 
-onMounted(async () => {
+const resolveReviewPayload = (res) => {
+  if (res?.data?.records !== undefined || res?.data?.total !== undefined) return res.data
+  if (res?.data?.data?.records !== undefined || res?.data?.data?.total !== undefined) return res.data.data
+  if (res?.records !== undefined || res?.total !== undefined) return res
+  return {}
+}
+
+const loadReviews = async () => {
+  reviewError.value = ''
+  try {
+    const res = await request.get(`/products/${route.params.id}/reviews?page=1&size=20`)
+    const payload = resolveReviewPayload(res)
+    reviews.value = Array.isArray(payload?.records) ? payload.records : []
+    reviewTotal.value = Number(payload?.total ?? reviews.value.length)
+  } catch (e) {
+    reviews.value = []
+    reviewTotal.value = 0
+    reviewError.value = '评价加载失败，请重试'
+    console.error('加载商品评价失败:', e)
+  }
+}
+
+const formatTime = (time) => {
+  if (!time) return '-'
+  const parsed = new Date(time)
+  if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleString('zh-CN')
+  return String(time)
+}
+
+const renderStars = (rating) => {
+  const count = Math.max(1, Math.min(5, Number(rating || 5)))
+  return `${'★'.repeat(count)}${'☆'.repeat(5 - count)}`
+}
+
+const getNameText = (name, id) => {
+  const value = String(name || '').trim()
+  if (value) return value.slice(0, 1).toUpperCase()
+  return String(id || 'U').slice(0, 1).toUpperCase()
+}
+
+const loadProductDetail = async () => {
   const res = await request.get(`/products/${route.params.id}`)
   product.value = res.data
   images.value = parseImages(res.data?.images)
   activeImage.value = images.value[0] || ''
   specs.value = parseSpecs(res.data?.specs)
   if (product.value?.id) {
-    addBrowseHistory({
-      type: 'PRODUCT',
-      id: product.value.id,
-      title: product.value.name,
-      subtitle: `￥${product.value.price || 0}`,
-      path: `/product/${product.value.id}`
-    })
+    try {
+      addBrowseHistory({
+        type: 'PRODUCT',
+        id: product.value.id,
+        title: product.value.name,
+        subtitle: `￥${product.value.price || 0}`,
+        path: `/product/${product.value.id}`
+      })
+    } catch (e) {
+      console.warn('记录浏览历史失败:', e)
+    }
   }
+}
+
+onMounted(async () => {
+  await loadProductDetail()
+  await loadReviews()
 })
+
+watch(
+  () => route.params.id,
+  async (id, oldId) => {
+    if (!id || id === oldId) return
+    await loadProductDetail()
+    await loadReviews()
+  }
+)
 
 const addCart = async () => {
   await request.post('/cart/add', {
@@ -330,6 +411,88 @@ const buyNow = async () => {
 .actions {
   display: flex;
   gap: 12px;
+}
+
+.review-section {
+  margin-top: 20px;
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.review-section h3 {
+  margin-bottom: 12px;
+  font-size: 20px;
+  color: #0f172a;
+}
+
+.review-empty {
+  color: #98a2b3;
+  font-size: 14px;
+  padding: 10px 0;
+}
+
+.review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-item {
+  border: 1px solid #e7eff9;
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fbff;
+}
+
+.review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.review-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.review-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.review-avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.review-time {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.review-rating {
+  margin-top: 8px;
+  color: #f59e0b;
+  letter-spacing: 1px;
+}
+
+.review-content {
+  margin-top: 8px;
+  color: #475467;
+  line-height: 1.6;
+  font-size: 14px;
 }
 
 .btn-secondary {

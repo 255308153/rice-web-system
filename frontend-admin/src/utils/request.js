@@ -1,7 +1,11 @@
 import axios from 'axios'
 
+const resolvedApiBase =
+  import.meta.env.VITE_API_BASE_URL ||
+  '/api'
+
 const request = axios.create({
-  baseURL: 'http://localhost:8080/api',
+  baseURL: resolvedApiBase,
   timeout: 45000
 })
 
@@ -26,7 +30,8 @@ request.interceptors.response.use(
   error => {
     const status = error?.response?.status
     const isLoginRequest = (error?.config?.url || '').includes('/auth/login')
-    if ((status === 401 || status === 403) && !isLoginRequest) {
+    // 401 表示登录态失效，需要清理登录信息；403 仅表示当前账号无权限，不应强制登出
+    if (status === 401 && !isLoginRequest) {
       clearAuthAndRedirect()
     }
     console.error('请求错误:', error)

@@ -57,6 +57,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
+import { decodeJwtPayload } from '../utils/jwt'
 
 const router = useRouter()
 const tab = ref('cert')
@@ -72,12 +73,9 @@ const currentUserId = ref(null)
 const decodeUserId = () => {
   const token = localStorage.getItem('token')
   if (!token) return
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    currentUserId.value = payload.userId || payload.id
-  } catch (e) {
-    console.log('解析用户ID失败', e)
-  }
+  const payload = decodeJwtPayload(token)
+  if (!payload) return
+  currentUserId.value = payload.userId || payload.id
 }
 
 const formatTime = (time) => {

@@ -29,8 +29,13 @@ SERVICE_PROVIDER = os.getenv("AI_PROVIDER", "tensorflow-hybrid")
 MODEL_VERSION = os.getenv("AI_MODEL_VERSION", "model-v1")
 
 ENABLE_HEURISTIC_FALLBACK = parse_bool(os.getenv("ENABLE_HEURISTIC_FALLBACK", "true"), True)
+# Disease model can be over-confidently "flat" on OOD images when labels do not include healthy.
+# When confidence is lower than this threshold, we run heuristic arbitration to avoid fixed ~0.34 outputs.
+DISEASE_LOW_CONF_THRESHOLD = float(os.getenv("DISEASE_LOW_CONF_THRESHOLD", "0.35"))
 
 BASE_DIR = Path(__file__).resolve().parent
+DATASET_RAW_DIR = Path(os.getenv("DATASET_RAW_DIR", str(BASE_DIR.parent / "datasets" / "raw")))
+CENTROID_MAX_IMAGES_PER_CLASS = int(os.getenv("CENTROID_MAX_IMAGES_PER_CLASS", "0"))
 RICE_MODEL_PATH = Path(os.getenv("RICE_MODEL_PATH", str(BASE_DIR / "models" / "rice_classifier.keras")))
 DISEASE_MODEL_PATH = Path(os.getenv("DISEASE_MODEL_PATH", str(BASE_DIR / "models" / "rice_disease_densenet201.keras")))
 RICE_LABELS_FILE = Path(os.getenv("RICE_LABELS_FILE", str(BASE_DIR / "models" / "rice_labels.txt")))
@@ -83,6 +88,20 @@ RICE_PROTOTYPES: Dict[str, np.ndarray] = {
     "Jasmine": np.array([0.89, 0.88, 0.82, 0.08, 0.038], dtype=np.float32),
     "Karacadag": np.array([0.70, 0.67, 0.58, 0.14, 0.060], dtype=np.float32),
 }
+
+
+FEATURE_KEYS = [
+    "mean_r",
+    "mean_g",
+    "mean_b",
+    "std_luma",
+    "edge",
+    "sat",
+    "green_ratio",
+    "yellow_ratio",
+    "brown_ratio",
+    "dark_ratio",
+]
 
 
 class PredictRequest(BaseModel):
@@ -181,7 +200,7 @@ class ModelRuntime:
 MODEL_RUNTIME = ModelRuntime()
 
 
-def decode_base64_image(raw_image: str) -> Image.Image:
+def decode_base64_bytes(raw_image: str) -> bytes:
     payload = raw_image.strip()
     if payload.startswith("data:image") and "," in payload:
         payload = payload.split(",", 1)[1]
@@ -189,19 +208,30 @@ def decode_base64_image(raw_image: str) -> Image.Image:
     payload = "".join(payload.split())
 
     try:
-        image_bytes = base64.b64decode(payload, validate=True)
+        return base64.b64decode(payload, validate=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"imageBase64 非法: {exc}") from exc
 
+def decode_image_array(image_bytes: bytes) -> np.ndarray:
+    if tf is None:
+        try:
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            arr = np.asarray(image, dtype=np.float32)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"图片解析失败: {exc}") from exc
+        if arr.shape[0] < 8 or arr.shape[1] < 8:
+            raise HTTPException(status_code=400, detail="图片尺寸过小，无法识别")
+        return arr
+
     try:
-        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        decoded = tf.io.decode_image(image_bytes, channels=3, expand_animations=False)
+        arr = tf.cast(decoded, tf.float32).numpy()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"图片解析失败: {exc}") from exc
 
-    if image.width < 8 or image.height < 8:
+    if arr.ndim != 3 or arr.shape[0] < 8 or arr.shape[1] < 8:
         raise HTTPException(status_code=400, detail="图片尺寸过小，无法识别")
-
-    return image
+    return arr
 
 
 def softmax(values: np.ndarray) -> np.ndarray:
@@ -252,9 +282,35 @@ def get_input_spec(model, default_hw: Tuple[int, int]) -> Tuple[int, int, bool, 
     return default_hw[0], default_hw[1], True, 3
 
 
-def prepare_input(image: Image.Image, height: int, width: int, channels_last: bool, channels: int) -> np.ndarray:
-    resized = image.resize((width, height))
-    arr = np.asarray(resized, dtype=np.float32) / 255.0
+def apply_backbone_preprocess(arr: np.ndarray, preprocess_mode: str | None) -> np.ndarray:
+    if tf is None:
+        return arr
+    mode = str(preprocess_mode or "").strip().lower()
+    if not mode:
+        return arr
+    if mode == "efficientnet":
+        return tf.keras.applications.efficientnet.preprocess_input(arr)
+    if mode == "densenet":
+        return tf.keras.applications.densenet.preprocess_input(arr)
+    return arr
+
+
+def prepare_input(
+    image: np.ndarray,
+    height: int,
+    width: int,
+    channels_last: bool,
+    channels: int,
+    preprocess_mode: str | None = None,
+) -> np.ndarray:
+    arr = np.asarray(image, dtype=np.float32)
+    if arr.ndim != 3:
+        raise ValueError("输入图片维度异常，期望 HWC")
+    if arr.shape[0] != height or arr.shape[1] != width:
+        if tf is not None:
+            arr = tf.image.resize(arr, (height, width)).numpy()
+        else:
+            arr = np.asarray(Image.fromarray(arr.astype(np.uint8)).resize((width, height)), dtype=np.float32)
 
     if channels == 1:
         arr = np.mean(arr, axis=-1, keepdims=True)
@@ -266,14 +322,29 @@ def prepare_input(image: Image.Image, height: int, width: int, channels_last: bo
             pad = np.zeros((arr.shape[0], arr.shape[1], channels - arr.shape[-1]), dtype=np.float32)
             arr = np.concatenate([arr, pad], axis=-1)
 
+    batch = np.expand_dims(arr, axis=0)
+    batch = apply_backbone_preprocess(batch, preprocess_mode)
     if channels_last:
-        return np.expand_dims(arr, axis=0)
-    return np.expand_dims(np.transpose(arr, (2, 0, 1)), axis=0)
+        return batch
+    return np.transpose(batch, (0, 3, 1, 2))
 
 
-def predict_with_model(model, image: Image.Image, class_names: List[str], default_hw: Tuple[int, int]) -> Tuple[str, float]:
+def predict_with_model(
+    model,
+    image: np.ndarray,
+    class_names: List[str],
+    default_hw: Tuple[int, int],
+    preprocess_mode: str | None = None,
+) -> Tuple[str, float]:
     h, w, channels_last, channels = get_input_spec(model, default_hw)
-    inputs = prepare_input(image, h, w, channels_last, channels)
+    inputs = prepare_input(
+        image=image,
+        height=h,
+        width=w,
+        channels_last=channels_last,
+        channels=channels,
+        preprocess_mode=preprocess_mode,
+    )
     outputs = model.predict(inputs, verbose=0)
 
     arr = np.asarray(outputs)
@@ -296,8 +367,11 @@ def predict_with_model(model, image: Image.Image, class_names: List[str], defaul
     return label, confidence
 
 
-def extract_features(image: Image.Image) -> Dict[str, float]:
-    arr = np.asarray(image, dtype=np.float32) / 255.0
+def extract_features(image: Image.Image | np.ndarray) -> Dict[str, float]:
+    if isinstance(image, Image.Image):
+        arr = np.asarray(image, dtype=np.float32) / 255.0
+    else:
+        arr = np.asarray(image, dtype=np.float32) / 255.0
 
     mean_rgb = arr.mean(axis=(0, 1))
     intensity = arr.mean(axis=2)
@@ -327,7 +401,87 @@ def extract_features(image: Image.Image) -> Dict[str, float]:
     }
 
 
+def _features_to_vector(features: Dict[str, float]) -> np.ndarray:
+    return np.array([float(features.get(key, 0.0)) for key in FEATURE_KEYS], dtype=np.float32)
+
+
+def _iter_image_files(folder: Path) -> List[Path]:
+    patterns = ("*.jpg", "*.jpeg", "*.png", "*.JPG", "*.JPEG", "*.PNG")
+    files: List[Path] = []
+    for pattern in patterns:
+        files.extend(folder.glob(pattern))
+    return files
+
+
+def build_feature_centroids(class_names: List[str], class_root: Path, max_images: int) -> Dict[str, np.ndarray]:
+    centroids: Dict[str, np.ndarray] = {}
+    if max_images <= 0 or not class_root.exists():
+        return centroids
+
+    for class_name in class_names:
+        class_dir = class_root / class_name
+        if not class_dir.exists() or not class_dir.is_dir():
+            continue
+
+        vectors: List[np.ndarray] = []
+        image_files = _iter_image_files(class_dir)
+        for img_path in image_files[: max(1, max_images)]:
+            try:
+                image = Image.open(img_path).convert("RGB")
+                vectors.append(_features_to_vector(extract_features(image)))
+            except Exception:
+                continue
+
+        if vectors:
+            centroids[class_name] = np.mean(np.stack(vectors, axis=0), axis=0).astype(np.float32)
+    return centroids
+
+
+def classify_from_centroids(features: Dict[str, float], centroids: Dict[str, np.ndarray]) -> Tuple[str, float]:
+    if not centroids:
+        raise ValueError("centroids empty")
+    vector = _features_to_vector(features)
+    labels = list(centroids.keys())
+    sims: List[float] = []
+    for label in labels:
+        distance = float(np.linalg.norm(vector - centroids[label]))
+        sims.append(-distance * 6.0)
+    probs = softmax(np.array(sims, dtype=np.float32))
+    best_index = int(np.argmax(probs))
+    return labels[best_index], float(probs[best_index])
+
+
+RICE_DATASET_CENTROIDS: Dict[str, np.ndarray] | None = None
+DISEASE_DATASET_CENTROIDS: Dict[str, np.ndarray] | None = None
+
+
+def get_rice_dataset_centroids() -> Dict[str, np.ndarray]:
+    global RICE_DATASET_CENTROIDS
+    if RICE_DATASET_CENTROIDS is None:
+        RICE_DATASET_CENTROIDS = build_feature_centroids(
+            class_names=RICE_LABELS,
+            class_root=DATASET_RAW_DIR / "Rice_Image_Dataset",
+            max_images=CENTROID_MAX_IMAGES_PER_CLASS,
+        )
+    return RICE_DATASET_CENTROIDS
+
+
+def get_disease_dataset_centroids() -> Dict[str, np.ndarray]:
+    global DISEASE_DATASET_CENTROIDS
+    if DISEASE_DATASET_CENTROIDS is None:
+        DISEASE_DATASET_CENTROIDS = build_feature_centroids(
+            class_names=DISEASE_CLASS_NAMES,
+            class_root=DATASET_RAW_DIR,
+            max_images=CENTROID_MAX_IMAGES_PER_CLASS,
+        )
+    return DISEASE_DATASET_CENTROIDS
+
+
 def classify_rice_type(features: Dict[str, float]) -> Tuple[str, float]:
+    rice_centroids = get_rice_dataset_centroids()
+    if rice_centroids:
+        return classify_from_centroids(features, rice_centroids)
+
     vector = np.array(
         [
             features["mean_r"],
@@ -352,6 +506,11 @@ def classify_rice_type(features: Dict[str, float]) -> Tuple[str, float]:
 
 
 def classify_disease(features: Dict[str, float]) -> Tuple[str, float]:
+    disease_centroids = get_disease_dataset_centroids()
+    if disease_centroids:
+        label, confidence = classify_from_centroids(features, disease_centroids)
+        return normalize_disease_label(label), confidence
+
     green_ratio = features["green_ratio"]
     yellow_ratio = features["yellow_ratio"]
     brown_ratio = features["brown_ratio"]
@@ -399,7 +558,7 @@ def build_suggestions(disease_name: str, rice_type: str) -> str:
     return f"识别品种为{rice_type}，暂未识别出明确病害。建议继续田间巡查，并上传叶片近景图提升识别准确度。"
 
 
-def predict_real_or_fallback(image: Image.Image) -> Dict[str, object]:
+def predict_real_or_fallback(image: np.ndarray) -> Dict[str, object]:
     features = extract_features(image)
 
     # Rice type
@@ -409,6 +568,7 @@ def predict_real_or_fallback(image: Image.Image) -> Dict[str, object]:
             image,
             class_names=RICE_LABELS,
             default_hw=(50, 50),
+            preprocess_mode="efficientnet",
         )
     elif ENABLE_HEURISTIC_FALLBACK:
         rice_type, rice_confidence = classify_rice_type(features)
@@ -422,8 +582,19 @@ def predict_real_or_fallback(image: Image.Image) -> Dict[str, object]:
             image,
             class_names=DISEASE_CLASS_NAMES,
             default_hw=(100, 100),
+            # The disease model already contains densenet.preprocess_input in-graph.
+            # Avoid double-preprocess here, otherwise prediction may collapse to one class.
+            preprocess_mode=None,
         )
         disease_name = normalize_disease_label(disease_label)
+
+        # Low-confidence arbitration: combine model with heuristic fallback to reduce
+        # repeated near-uniform probabilities (e.g., around 0.34 for 3 classes).
+        if ENABLE_HEURISTIC_FALLBACK and float(disease_confidence) < DISEASE_LOW_CONF_THRESHOLD:
+            heuristic_name, heuristic_confidence = classify_disease(features)
+            if float(heuristic_confidence) >= float(disease_confidence):
+                disease_name = heuristic_name
+                disease_confidence = float(heuristic_confidence)
     elif ENABLE_HEURISTIC_FALLBACK:
         disease_name, disease_confidence = classify_disease(features)
     else:
@@ -452,7 +623,8 @@ def health() -> HealthResponse:
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest) -> PredictResponse:
-    image = decode_base64_image(req.imageBase64)
+    image_bytes = decode_base64_bytes(req.imageBase64)
+    image = decode_image_array(image_bytes)
     result = predict_real_or_fallback(image)
     return PredictResponse(**result)
 

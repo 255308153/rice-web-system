@@ -44,6 +44,7 @@
 import { reactive, ref } from 'vue'
 import { login, register } from '@/api/user'
 import { useRouter } from 'vue-router'
+import { getRoleFromToken } from '@/utils/jwt'
 
 const router = useRouter()
 const USER_FRONT_ROLES = ['USER', 'EXPERT']
@@ -55,15 +56,6 @@ const form = reactive({
   phone: ''
 })
 const loading = ref(false)
-
-const getRoleFromToken = (token) => {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return payload.role || 'USER'
-  } catch (e) {
-    return null
-  }
-}
 
 const resolveHomePathByRole = (role) => (role === 'EXPERT' ? '/expert' : '/')
 
@@ -106,7 +98,7 @@ const handleLogin = async () => {
     router.push(resolveHomePathByRole(role))
     setTimeout(() => location.reload(), 100)
   } catch (err) {
-    alert('登录失败，请稍后重试')
+    alert(err?.response?.data?.message || err?.message || '登录失败，请稍后重试')
   } finally {
     loading.value = false
   }
@@ -149,7 +141,7 @@ const handleRegister = async () => {
     router.push(resolveHomePathByRole(role))
     setTimeout(() => location.reload(), 100)
   } catch (err) {
-    alert('注册失败，请稍后重试')
+    alert(err?.response?.data?.message || err?.message || '注册失败，请稍后重试')
   } finally {
     loading.value = false
   }

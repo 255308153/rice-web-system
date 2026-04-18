@@ -84,7 +84,7 @@ const formatTime = (time) => {
 
 const loadNotices = async () => {
   try {
-    const res = await request.get('/admin/notices?limit=5')
+    const res = await request.get('/notices?limit=5')
     if (res.code === 200) {
       notices.value = res.data || []
     }
@@ -153,8 +153,8 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   background:
-    radial-gradient(320px 160px at 12% 8%, rgba(255,255,255,0.18), transparent 64%),
-    linear-gradient(135deg, #0f6bcf 0%, #0f766e 100%);
+    radial-gradient(320px 160px at 12% 8%, rgba(255,255,255,0.2), transparent 64%),
+    linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
   color: #fff;
 }
 
@@ -176,8 +176,9 @@ onMounted(async () => {
 }
 
 .btn-forum {
-  background: #fff7ed;
-  color: #9a3412;
+  background: #f0fdfa;
+  color: #0f766e;
+  border: 1px solid rgba(15, 118, 110, 0.2);
   padding: 10px 16px;
 }
 
@@ -205,8 +206,8 @@ onMounted(async () => {
 }
 
 .panel-head button {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: #ecfeff;
+  color: #0f766e;
   padding: 8px 14px;
 }
 
@@ -243,14 +244,14 @@ onMounted(async () => {
 .stat-card {
   padding: 18px;
   border-radius: 14px;
-  background: linear-gradient(155deg, #f8fbff, #fff7ed);
+  background: linear-gradient(155deg, #f0fdfa, #ecfeff);
   border: 1px solid #e6edf5;
 }
 
 .stat-value {
   font-size: 34px;
   font-weight: 800;
-  color: #0f6bcf;
+  color: #0f766e;
 }
 
 .stat-label {
